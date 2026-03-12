@@ -71,7 +71,6 @@ namespace Lunar.Core
 
                 lastInteractionTime = Time.time;
                 ResourceManager.Instance.PerformResourceAction(ResourceType.Energy);
-                UserSessionManager.Instance?.RecordInteraction();
             }
 
             if (Input.GetKeyDown(KeyCode.R) && RitualEngine.Instance != null)
@@ -79,7 +78,6 @@ namespace Lunar.Core
                 if (RitualEngine.Instance.IsRitualActive())
                 {
                     RitualEngine.Instance.PerformValveInteraction();
-                    UserSessionManager.Instance?.RecordInteraction();
                 }
             }
 
@@ -96,14 +94,13 @@ namespace Lunar.Core
             Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
 
-            if (Physics.Raycast(ray, out hit, maxInteractionDistance, interactableLayer))
+            if (Physics.Raycast(ray, out hit, maxInteractionDistance, GetEffectiveLayerMask()))
             {
                 GameObject hitObject = hit.collider.gameObject;
                 ProcessInteraction(hitObject, hit.point);
 
                 if (Time.time - lastInteractionTime < interactionCooldown) return;
                 lastInteractionTime = Time.time;
-                UserSessionManager.Instance?.RecordInteraction();
             }
         }
 
@@ -159,7 +156,7 @@ namespace Lunar.Core
             Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
 
-            if (Physics.Raycast(ray, out hit, maxInteractionDistance, interactableLayer))
+            if (Physics.Raycast(ray, out hit, maxInteractionDistance, GetEffectiveLayerMask()))
             {
                 Interactable newInteractable = hit.collider.GetComponent<Interactable>();
                 if (newInteractable != currentInteractable)
@@ -207,6 +204,11 @@ namespace Lunar.Core
         {
             return clickDelay;
         }
+
+        private LayerMask GetEffectiveLayerMask()
+        {
+            return interactableLayer.value == 0 ? Physics.DefaultRaycastLayers : interactableLayer;
+        }
     }
 
     public abstract class Interactable : MonoBehaviour
@@ -219,6 +221,7 @@ namespace Lunar.Core
     public class ResourceInteractable : Interactable
     {
         [SerializeField] private ResourceType resourceType;
+        [SerializeField] private Color highlightColor = Color.yellow;
 
         private Material originalMaterial;
         private Material highlightMaterial;
@@ -233,9 +236,9 @@ namespace Lunar.Core
             }
 
             highlightMaterial = new Material(Shader.Find("Standard"));
-            highlightMaterial.color = Color.yellow;
+            highlightMaterial.color = highlightColor;
             highlightMaterial.EnableKeyword("_EMISSION");
-            highlightMaterial.SetColor("_EmissionColor", Color.yellow * 0.5f);
+            highlightMaterial.SetColor("_EmissionColor", highlightColor * 0.5f);
         }
 
         public override void OnInteract(Vector3 hitPoint)
@@ -269,16 +272,24 @@ namespace Lunar.Core
                 objectRenderer.material = originalMaterial;
             }
         }
+
+        public void Configure(ResourceType type, Color color)
+        {
+            resourceType = type;
+            highlightColor = color;
+        }
     }
 
     public class RitualValveInteractable : Interactable
     {
         private Animator animator;
         private bool isValveOpen = false;
+        private Vector3 originalScale;
 
         private void Start()
         {
             animator = GetComponent<Animator>();
+            originalScale = transform.localScale;
         }
 
         public override void OnInteract(Vector3 hitPoint)
@@ -301,12 +312,12 @@ namespace Lunar.Core
 
         public override void OnHoverEnter()
         {
-            transform.localScale = Vector3.one * 1.1f;
+            transform.localScale = originalScale * 1.1f;
         }
 
         public override void OnHoverExit()
         {
-            transform.localScale = Vector3.one;
+            transform.localScale = originalScale;
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace Lunar.Core
 {
@@ -8,7 +9,7 @@ namespace Lunar.Core
     {
         [Header("Scene Configuration")]
         [SerializeField] private string mainExperienceScene = "LunarBase";
-        [SerializeField] private float fadeDuration = 2f;
+        [SerializeField] private float fadeDuration = 1.5f;
         [SerializeField] private CanvasGroup fadeCanvasGroup;
 
         [Header("Startup UI")]
@@ -17,26 +18,31 @@ namespace Lunar.Core
         [SerializeField] private GameObject errorPanel;
         [SerializeField] private Text loadingText;
         [SerializeField] private Slider loadingSlider;
+        [SerializeField] private Button startButton;
+        [SerializeField] private Button continueButton;
+        [SerializeField] private Text statusText;
+        [SerializeField] private Text errorText;
 
         [Header("Startup Settings")]
-        [SerializeField] private bool skipStartup = false;
+        [SerializeField] private bool skipStartup;
         [SerializeField] private bool loadSavedProgress = true;
-        [SerializeField] private bool enableTutorial = false;
 
         private AsyncOperation loadOperation;
-        private bool isLoading = false;
+        private bool isLoading;
 
         private void Start()
         {
             InitializeStartupScene();
+            RegisterButtonCallbacks();
+            RefreshStartupUi();
 
             if (skipStartup)
             {
-                StartCoroutine(SkipToExperience());
+                ContinueExperience();
             }
             else
             {
-                ShowStartupPanel();
+                startupPanel?.SetActive(true);
             }
         }
 
@@ -47,22 +53,51 @@ namespace Lunar.Core
                 fadeCanvasGroup.alpha = 0f;
             }
 
-            if (startupPanel != null) startupPanel.SetActive(false);
-            if (loadingPanel != null) loadingPanel.SetActive(false);
-            if (errorPanel != null) errorPanel.SetActive(false);
+            startupPanel?.SetActive(false);
+            loadingPanel?.SetActive(false);
+            errorPanel?.SetActive(false);
         }
 
-        private void ShowStartupPanel()
+        private void RegisterButtonCallbacks()
         {
-            if (startupPanel != null)
+            if (startButton != null)
             {
-                startupPanel.SetActive(true);
+                startButton.onClick.RemoveAllListeners();
+                startButton.onClick.AddListener(StartNewExperience);
+            }
+
+            if (continueButton != null)
+            {
+                continueButton.onClick.RemoveAllListeners();
+                continueButton.onClick.AddListener(ContinueExperience);
+            }
+        }
+
+        private void RefreshStartupUi()
+        {
+            bool hasSave = loadSavedProgress &&
+                           UserSessionManager.Instance != null &&
+                           UserSessionManager.Instance.HasSavedProgress();
+
+            if (continueButton != null)
+            {
+                continueButton.interactable = hasSave;
+            }
+
+            if (statusText != null)
+            {
+                statusText.text = hasSave
+                    ? "Saved progress detected. Continue is available."
+                    : "No saved progress yet. Start a fresh session.";
             }
         }
 
         public void StartNewExperience()
         {
-            if (isLoading) return;
+            if (isLoading)
+            {
+                return;
+            }
 
             UserSessionManager.Instance?.InitializeNewSession();
             LoadExperienceScene();
@@ -70,32 +105,30 @@ namespace Lunar.Core
 
         public void ContinueExperience()
         {
-            if (isLoading) return;
-
-            if (loadSavedProgress)
+            if (isLoading)
             {
-                UserSessionManager.Instance?.LoadProgress();
+                return;
             }
-            LoadExperienceScene();
-        }
 
-        public void StartTutorial()
-        {
-            if (isLoading) return;
+            if (loadSavedProgress && UserSessionManager.Instance != null && UserSessionManager.Instance.HasSavedProgress())
+            {
+                UserSessionManager.Instance.LoadProgress();
+            }
+            else
+            {
+                UserSessionManager.Instance?.InitializeNewSession();
+            }
 
-            enableTutorial = true;
             LoadExperienceScene();
         }
 
         private void LoadExperienceScene()
         {
-            if (isLoading) return;
-
             isLoading = true;
-
-            if (startupPanel != null) startupPanel.SetActive(false);
-            if (loadingPanel != null) loadingPanel.SetActive(true);
-
+            startupPanel?.SetActive(false);
+            loadingPanel?.SetActive(true);
+            UpdateLoadingProgress(0f);
+            UpdateStatusText("Launching lunar base...");
             StartCoroutine(LoadSceneAsync());
         }
 
@@ -103,44 +136,35 @@ namespace Lunar.Core
         {
             if (fadeCanvasGroup != null)
             {
-                yield return StartCoroutine(FadeIn(fadeDuration));
+                yield return StartCoroutine(Fade(0f, 1f, fadeDuration));
             }
 
             loadOperation = SceneManager.LoadSceneAsync(mainExperienceScene);
+            if (loadOperation == null)
+            {
+                ShowError($"Unable to load scene: {mainExperienceScene}");
+                isLoading = false;
+                yield break;
+            }
+
             loadOperation.allowSceneActivation = false;
 
-            while (!loadOperation.isDone)
+            while (loadOperation.progress < 0.9f)
             {
-                float progress = Mathf.Clamp01(loadOperation.progress / 0.9f);
-                UpdateLoadingProgress(progress);
-
-                if (loadOperation.progress >= 0.9f)
-                {
-                    break;
-                }
-
+                UpdateLoadingProgress(Mathf.Clamp01(loadOperation.progress / 0.9f));
                 yield return null;
             }
 
             UpdateLoadingProgress(1f);
-
-            yield return new WaitForSeconds(0.5f);
-
+            yield return new WaitForSeconds(0.25f);
             loadOperation.allowSceneActivation = true;
-
-            yield return new WaitForSeconds(0.5f);
-
-            if (fadeCanvasGroup != null)
-            {
-                yield return StartCoroutine(FadeOut(fadeDuration));
-            }
         }
 
         private void UpdateLoadingProgress(float progress)
         {
             if (loadingText != null)
             {
-                loadingText.text = $"Loading... {Mathf.RoundToInt(progress * 100)}%";
+                loadingText.text = $"Loading... {Mathf.RoundToInt(progress * 100f)}%";
             }
 
             if (loadingSlider != null)
@@ -149,67 +173,41 @@ namespace Lunar.Core
             }
         }
 
-        private IEnumerator FadeIn(float duration)
+        private IEnumerator Fade(float from, float to, float duration)
         {
             float elapsed = 0f;
+
             while (elapsed < duration)
             {
                 elapsed += Time.deltaTime;
-                fadeCanvasGroup.alpha = Mathf.Lerp(0f, 1f, elapsed / duration);
-                yield return null;
-            }
-            fadeCanvasGroup.alpha = 1f;
-        }
-
-        private IEnumerator FadeOut(float duration)
-        {
-            float elapsed = 0f;
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                fadeCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / duration);
-                yield return null;
-            }
-            fadeCanvasGroup.alpha = 0f;
-        }
-
-        private IEnumerator SkipToExperience()
-        {
-            if (fadeCanvasGroup != null)
-            {
-                fadeCanvasGroup.alpha = 1f;
-            }
-
-            if (startupPanel != null) startupPanel.SetActive(false);
-            if (loadingPanel != null) loadingPanel.SetActive(true);
-
-            yield return new WaitForSeconds(0.5f);
-
-            loadOperation = SceneManager.LoadSceneAsync(mainExperienceScene);
-            loadOperation.allowSceneActivation = false;
-
-            while (!loadOperation.isDone)
-            {
-                if (loadOperation.progress >= 0.9f)
-                {
-                    break;
-                }
+                fadeCanvasGroup.alpha = Mathf.Lerp(from, to, elapsed / duration);
                 yield return null;
             }
 
-            loadOperation.allowSceneActivation = true;
+            fadeCanvasGroup.alpha = to;
         }
 
         public void ShowError(string errorMessage)
         {
+            isLoading = false;
+            loadingPanel?.SetActive(false);
+            errorPanel?.SetActive(true);
+            UpdateStatusText(errorMessage);
+
             if (errorPanel != null)
             {
-                errorPanel.SetActive(true);
-                Text errorText = errorPanel.GetComponentInChildren<Text>();
                 if (errorText != null)
                 {
                     errorText.text = errorMessage;
                 }
+            }
+        }
+
+        private void UpdateStatusText(string message)
+        {
+            if (statusText != null)
+            {
+                statusText.text = message;
             }
         }
 
@@ -220,14 +218,6 @@ namespace Lunar.Core
 #else
             Application.Quit();
 #endif
-        }
-
-        public void OpenSettings()
-        {
-        }
-
-        public void ShowCredits()
-        {
         }
     }
 }

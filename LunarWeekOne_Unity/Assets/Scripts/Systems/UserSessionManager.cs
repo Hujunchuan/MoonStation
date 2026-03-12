@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 using System.IO;
-using System.Text;
+using Lunar.Data;
+using UnityEngine;
 
 namespace Lunar.Core
 {
@@ -12,35 +12,35 @@ namespace Lunar.Core
 
         private UserSessionData currentSession;
         private string saveFilePath;
-
         private float sessionStartTime;
-        private int totalInteractions;
-        private float averageInteractionInterval;
-        private List<float> interactionTimestamps = new List<float>();
+        private readonly List<float> interactionTimestamps = new List<float>();
 
         public event Action OnSessionStarted;
         public event Action OnSessionEnded;
-        public event Action<float> OnSessionProgress;
         public event Action OnProgressSaved;
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
+
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
 
             saveFilePath = Path.Combine(Application.persistentDataPath, "LunarWeekOne_Session.json");
         }
 
-        private void Start()
+        public bool HasSavedProgress()
         {
-            InitializeNewSession();
+            return File.Exists(saveFilePath);
+        }
+
+        public bool HasActiveSession()
+        {
+            return currentSession != null;
         }
 
         public void InitializeNewSession()
@@ -54,98 +54,111 @@ namespace Lunar.Core
                 oxygenLevel = LunarConstants.DEFAULT_OXYGEN_LEVEL,
                 waterLevel = LunarConstants.DEFAULT_WATER_LEVEL,
                 completedRituals = new List<string>(),
-                sessionStart = DateTime.Now,
-                TotalInteractions = 0,
-                AverageInteractionInterval = 0f
+                sessionStartIso = DateTime.UtcNow.ToString("o"),
+                totalInteractions = 0,
+                averageInteractionInterval = 0f
             };
 
-            sessionStartTime = Time.time;
-            totalInteractions =138;
             interactionTimestamps.Clear();
+            sessionStartTime = Time.time;
+            OnSessionStarted?.Invoke();
         }
 
         public void LoadProgress()
         {
-            if (File.Exists(saveFilePath))
+            if (!HasSavedProgress())
             {
-                try
-                {
-                    string json = File.ReadAllText(saveFilePath);
-                    currentSession = JsonUtility.FromJson<UserSessionData>(json);
-                    Debug.Log($"[UserSessionManager] Progress loaded: Day {currentSession.currentDay}");
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning($"[UserSessionManager] Failed to load progress: {e.Message}");
-                    InitializeNewSession();
-                }
+                InitializeNewSession();
+                return;
             }
-            else
+
+            try
             {
-                Debug.Log("[UserSessionManager] No saved progress found");
+                string json = File.ReadAllText(saveFilePath);
+                currentSession = JsonUtility.FromJson<UserSessionData>(json) ?? new UserSessionData();
+                EnsureSessionCollections();
+                ResumeActiveSession();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning($"[UserSessionManager] Failed to load progress: {exception.Message}");
                 InitializeNewSession();
             }
         }
 
+        public void ResumeActiveSession()
+        {
+            if (currentSession == null)
+            {
+                InitializeNewSession();
+                return;
+            }
+
+            EnsureSessionCollections();
+            sessionStartTime = Time.time - Mathf.Max(0f, currentSession.sessionDuration);
+            interactionTimestamps.Clear();
+            OnSessionStarted?.Invoke();
+        }
+
         public void SaveProgress()
         {
-            if (currentSession == null) return;
+            EnsureSession();
+            currentSession.sessionDuration = GetSessionDuration();
 
-            currentSession.sessionDuration = Time.time - sessionStartTime;
-
-            string json = JsonUtility.ToJson(currentSession, true);
             try
             {
+                string json = JsonUtility.ToJson(currentSession, true);
                 File.WriteAllText(saveFilePath, json);
-                Debug.Log($"[UserSessionManager] Progress saved to {saveFilePath}");
                 OnProgressSaved?.Invoke();
             }
-            catch (Exception e)
+            catch (Exception exception)
             {
-                Debug.LogError($"[UserSessionManager] Failed to save progress: {e.Message}");
+                Debug.LogError($"[UserSessionManager] Failed to save progress: {exception.Message}");
             }
         }
 
         public void RecordInteraction()
         {
-            float currentTime = Time.time;
-            float elapsed = currentTime - sessionStartTime;
+            EnsureSession();
 
-            totalInteractions++;
-            interactionTimestamps.Add(currentTime);
-
-            currentSession.TotalInteractions = totalInteractions;
+            float now = Time.time;
+            interactionTimestamps.Add(now);
+            currentSession.totalInteractions++;
 
             if (interactionTimestamps.Count > 1)
             {
                 float totalInterval = 0f;
-                for (int i = 1; i < interactionTimestamps.Count; i++)
+
+                for (int index = 1; index < interactionTimestamps.Count; index++)
                 {
-                    totalInterval += (interactionTimestamps[i] - interactionTimestamps[i - 1]);
+                    totalInterval += interactionTimestamps[index] - interactionTimestamps[index - 1];
                 }
-                averageInteractionInterval = totalInterval / (interactionTimestamps.Count - 1);
-                currentSession.AverageInteractionInterval = averageInteractionInterval;
+
+                currentSession.averageInteractionInterval = totalInterval / (interactionTimestamps.Count - 1);
             }
         }
 
         public void CompleteDay(int dayNumber)
         {
+            EnsureSession();
+
             if (!currentSession.completedDays.Contains(dayNumber))
             {
                 currentSession.completedDays.Add(dayNumber);
             }
 
-            currentSession.currentDay = dayNumber + 1;
-
+            currentSession.currentDay = Mathf.Clamp(dayNumber + 1, 1, LunarConstants.TOTAL_LUNAR_DAYS);
             SaveProgress();
         }
 
         public void RecordRitualCompletion(LunarDay day, RitualPhase finalPhase, bool completed, int interactionCount)
         {
-            string ritualName = $"{day}_Ritual_{finalPhase}";
-            if (!currentSession.completedRituals.Contains(ritualName))
+            EnsureSession();
+
+            string record = $"{day}:{finalPhase}:{completed}:{interactionCount}";
+            if (!currentSession.completedRituals.Contains(record))
             {
-                currentSession.completedRituals.Add(ritualName);
+                currentSession.completedRituals.Add(record);
             }
 
             SaveProgress();
@@ -153,89 +166,97 @@ namespace Lunar.Core
 
         public void UpdateResourceLevels(float energy, float oxygen, float water)
         {
+            EnsureSession();
             currentSession.energyLevel = energy;
             currentSession.oxygenLevel = oxygen;
             currentSession.waterLevel = water;
         }
 
+        public void SetCurrentDay(LunarDay day)
+        {
+            EnsureSession();
+            currentSession.currentDay = Mathf.Clamp((int)day, 1, LunarConstants.TOTAL_LUNAR_DAYS);
+        }
+
         public void SetMoodMarkers(int before, int after)
         {
-            if (currentSession != null)
-            {
-                currentSession.MoodBefore = before;
-                currentSession.MoodAfter = after;
-            }
+            EnsureSession();
+            currentSession.moodBefore = before;
+            currentSession.moodAfter = after;
         }
 
         public UserSessionData GetCurrentSession()
         {
+            EnsureSession();
             return currentSession;
         }
 
         public int GetCurrentDay()
         {
-            return currentSession?.currentDay ?? 1;
+            EnsureSession();
+            return currentSession.currentDay;
+        }
+
+        public LunarDay GetCurrentDayEnum()
+        {
+            EnsureSession();
+            int clamped = Mathf.Clamp(currentSession.currentDay, 1, LunarConstants.TOTAL_LUNAR_DAYS);
+            return (LunarDay)clamped;
         }
 
         public float GetSessionDuration()
         {
+            EnsureSession();
             return Time.time - sessionStartTime;
         }
 
         public int GetCompletedDayCount()
         {
-            return currentSession?.completedDays?.Count ?? 0;
+            EnsureSession();
+            return currentSession.completedDays.Count;
         }
 
         public float GetAverageInteractionInterval()
         {
-            return averageInteractionInterval;
+            EnsureSession();
+            return currentSession.averageInteractionInterval;
         }
 
         public void EndSession()
         {
             SaveProgress();
             OnSessionEnded?.Invoke();
-
-            GenerateSessionReport();
         }
 
-        private void GenerateSessionReport()
+        private void EnsureSession()
         {
-            StringBuilder report = new StringBuilder();
-            report.AppendLine("=== Lunar Week One Session Report ===");
-            report.AppendLine($"Session Date: {currentSession.sessionStart}");
-            report.AppendLine($"Session Duration: {currentSession.sessionDuration:F1} seconds");
-            report.AppendLine($"Completed Days: {currentSession.completedDays.Count}/7");
-            report.AppendLine($"Total Interactions: {totalInteractions}");
-            report.AppendLine($"Average Interaction Interval: {averageInteractionInterval:F2}s");
-            report.AppendLine($"Energy Level: {currentSession.energyLevel:P}");
-            report.AppendLine($"Oxygen Level: {currentSession.oxygenLevel:P}");
-            report.AppendLine($"Water Level: {currentSession.waterLevel:P}");
-            report.AppendLine($"Completed Rituals: {currentSession.completedRituals.Count}");
-
-            Debug.Log(report.ToString());
+            if (currentSession == null)
+            {
+                InitializeNewSession();
+            }
         }
-    }
 
-    [System.Serializable]
-    public class UserSessionData
-    {
-        public int currentDay = 1;
-        public List<int> completedDays = new List<int>();
-        public float sessionDuration = 0f;
-        public DateTime sessionStart;
+        private void EnsureSessionCollections()
+        {
+            if (currentSession.completedDays == null)
+            {
+                currentSession.completedDays = new List<int>();
+            }
 
-        public float energyLevel = 0.8f;
-        public float oxygenLevel = 0.8f;
-        public float waterLevel = 0.8f;
+            if (currentSession.completedRituals == null)
+            {
+                currentSession.completedRituals = new List<string>();
+            }
 
-        public int MoodBefore;
-        public int MoodAfter;
+            currentSession.currentDay = Mathf.Clamp(currentSession.currentDay, 1, LunarConstants.TOTAL_LUNAR_DAYS);
+        }
 
-        public List<string> completedRituals = new List<string>();
-
-        public int TotalInteractions = 0;
-        public float AverageInteractionInterval = 0f;
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
     }
 }

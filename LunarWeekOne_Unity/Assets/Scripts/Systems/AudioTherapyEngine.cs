@@ -8,366 +8,384 @@ namespace Lunar.Core
     {
         public static AudioTherapyEngine Instance { get; private set; }
 
-        [Header("Audio Mixer")]
+        [Header("Mixer")]
         [SerializeField] private AudioMixer mainMixer;
-        [SerializeField] private AudioMixerGroup masterGroup;
         [SerializeField] private AudioMixerGroup ambientGroup;
         [SerializeField] private AudioMixerGroup breathGroup;
         [SerializeField] private AudioMixerGroup voiceGroup;
         [SerializeField] private AudioMixerGroup sfxGroup;
 
-        [Header("Ambient Layer")]
+        [Header("Sources")]
         [SerializeField] private AudioSource ambientLowFreqSource;
         [SerializeField] private AudioSource ambientMidFreqSource;
-
-        [Header("Breath Guide")]
         [SerializeField] private AudioSource breathInSource;
         [SerializeField] private AudioSource breathOutSource;
         [SerializeField] private AudioSource breathMetronomeSource;
-
-        [Header("Voice Over")]
         [SerializeField] private AudioSource voiceSource;
-
-        [Header("SFX")]
         [SerializeField] private AudioSource sfxSource;
 
-        [Header("Settings")]
-        [SerializeField] private float breathBPM = 60f;
+        [Header("Levels")]
+        [SerializeField] private float breathBpm = 60f;
         [SerializeField] private float masterVolume = 0.8f;
         [SerializeField] private float ambientVolume = 0.6f;
-        [SerializeField] private float breathVolume = 0.5f;
+        [SerializeField] private float breathVolume = 0.45f;
         [SerializeField] private float voiceVolume = 0.7f;
 
-        private float breathCycleDuration;
+        private readonly Dictionary<string, AudioClip> clipCache = new Dictionary<string, AudioClip>();
+        private readonly List<AudioSource> loopingSources = new List<AudioSource>();
+
+        private bool isBreathGuideActive;
         private float breathPhase;
-        private bool isBreathActive;
-        private bool isInRitual;
-
-        private Dictionary<string, AudioClip> clipCache = new Dictionary<string, AudioClip>();
-        private List<AudioSource> activeLoopingSources = new List<AudioSource>();
-
-        public event Action OnNarrativeComplete;
-        public event Action OnRitualAudioComplete;
+        private float breathCycleDuration;
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
 
-            breathCycleDuration = 60f / breathBPM * 4f;
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+
+            breathCycleDuration = Mathf.Max(0.1f, 60f / breathBpm * 4f);
             InitializeAudioSources();
+            ApplyMixerSettings();
+        }
+
+        private void Update()
+        {
+            if (isBreathGuideActive)
+            {
+                UpdateBreathGuide();
+            }
         }
 
         private void InitializeAudioSources()
         {
             if (ambientLowFreqSource == null)
             {
-                ambientLowFreqSource = CreateAudioSource("Ambient_LowFreq", true, ambientGroup);
+                ambientLowFreqSource = CreateAudioSource("AmbientLow", true, ambientGroup);
             }
+
             if (ambientMidFreqSource == null)
             {
-                ambientMidFreqSource = CreateAudioSource("Ambient_MidFreq", true, ambientGroup);
+                ambientMidFreqSource = CreateAudioSource("AmbientMid", true, ambientGroup);
             }
+
             if (breathInSource == null)
             {
-                breathInSource = CreateAudioSource("Breath_In", true, breathGroup);
+                breathInSource = CreateAudioSource("BreathIn", true, breathGroup);
             }
+
             if (breathOutSource == null)
             {
-                breathOutSource = CreateAudioSource("Breath_Out", true, breathGroup);
+                breathOutSource = CreateAudioSource("BreathOut", true, breathGroup);
             }
+
             if (breathMetronomeSource == null)
             {
-                breathMetronomeSource = CreateAudioSource("Breath_Metronome", true, breathGroup);
+                breathMetronomeSource = CreateAudioSource("BreathMetronome", true, breathGroup);
             }
+
             if (voiceSource == null)
             {
                 voiceSource = CreateAudioSource("Voice", false, voiceGroup);
             }
+
             if (sfxSource == null)
             {
-                sfxSource = CreateAudioSource("SFX", false, sfxGroup);
+                sfxSource = CreateAudioSource("Sfx", false, sfxGroup);
             }
         }
 
-        private AudioSource CreateAudioSource(string name, bool loop, AudioMixerGroup group)
+        private AudioSource CreateAudioSource(string sourceName, bool loop, AudioMixerGroup group)
         {
-            GameObject go = new GameObject(name);
-            go.transform.SetParent(transform);
-            AudioSource source = go.AddComponent<AudioSource>();
+            GameObject sourceObject = new GameObject(sourceName);
+            sourceObject.transform.SetParent(transform, false);
+
+            AudioSource source = sourceObject.AddComponent<AudioSource>();
             source.playOnAwake = false;
             source.loop = loop;
             source.outputAudioMixerGroup = group;
+
+            if (loop)
+            {
+                loopingSources.Add(source);
+            }
+
             return source;
         }
 
-        private void Start()
+        private void ApplyMixerSettings()
         {
             SetMasterVolume(masterVolume);
             SetAmbientVolume(ambientVolume);
-            StartAmbientLayer();
-        }
-
-        private void Update()
-        {
-            if (isBreathActive && !isInRitual)
-            {
-                UpdateBreathGuide();
-            }
-
-            HandleSpatialAudio();
+            SetBreathVolume(breathVolume);
+            SetVoiceVolume(voiceVolume);
         }
 
         private void UpdateBreathGuide()
         {
             breathPhase += Time.deltaTime / breathCycleDuration;
-            if (breathPhase >= 1f)
+            if (breathPhase > 1f)
             {
-                breathPhase = 0f;
+                breathPhase -= 1f;
             }
 
-            float breathProgress = Mathf.Sin(breathPhase * Mathf.PI);
+            float inhaleWeight = Mathf.Clamp01(Mathf.Sin(breathPhase * Mathf.PI));
+            float exhaleWeight = Mathf.Clamp01(1f - inhaleWeight);
 
             if (breathInSource != null && breathInSource.isPlaying)
             {
-                breathInSource.volume = breathVolume * Mathf.Clamp01(breathProgress);
+                breathInSource.volume = breathVolume * inhaleWeight;
             }
+
             if (breathOutSource != null && breathOutSource.isPlaying)
             {
-                breathOutSource.volume = breathVolume * Mathf.Clamp01(1f - breathProgress);
+                breathOutSource.volume = breathVolume * exhaleWeight;
             }
         }
 
         public void StartAmbientLayer()
         {
-            if (ambientLowFreqSource != null && !ambientLowFreqSource.isPlaying)
-            {
-                ambientLowFreqSource.Play();
-            }
-            if (ambientMidFreqSource != null && !ambientMidFreqSource.isPlaying)
-            {
-                ambientMidFreqSource.Play();
-            }
+            EnsureClip(ambientLowFreqSource, "ambient_low");
+            EnsureClip(ambientMidFreqSource, "ambient_mid");
+            PlayIfReady(ambientLowFreqSource);
+            PlayIfReady(ambientMidFreqSource);
         }
 
         public void SetAmbientFrequency(float frequency)
         {
             if (ambientLowFreqSource != null)
             {
-                ambientLowFreqSource.pitch = frequency / 60f;
+                ambientLowFreqSource.pitch = Mathf.Clamp(frequency / 60f, 0.5f, 2f);
             }
         }
 
         public void SetBreathGuideActive(bool active)
         {
-            isBreathActive = active;
+            isBreathGuideActive = active;
+            breathPhase = 0f;
 
-            if (breathInSource != null)
-            {
-                if (active) breathInSource.Play();
-                else breathInSource.Stop();
-            }
-            if (breathOutSource != null)
-            {
-                if (active) breathOutSource.Play();
-                else breathOutSource.Stop();
-            }
-            if (breathMetronomeSource != null)
-            {
-                if (active) breathMetronomeSource.Play();
-                else breathMetronomeSource.Stop();
-            }
+            EnsureClip(breathInSource, "breath_in");
+            EnsureClip(breathOutSource, "breath_out");
+            EnsureClip(breathMetronomeSource, "breath_metronome");
+
+            ToggleLoopSource(breathInSource, active);
+            ToggleLoopSource(breathOutSource, active);
+            ToggleLoopSource(breathMetronomeSource, active);
         }
 
         public void SetRitualMode(bool ritualActive)
         {
-            isInRitual = ritualActive;
-
-            float ambientTarget = ritualActive ? 0.3f : ambientVolume;
-            float breathTarget = ritualActive ? breathVolume : 0f;
-
-            StartCoroutine(SmoothVolumeChange(ambientGroup, ambientTarget, 1f));
-            StartCoroutine(SmoothVolumeChange(breathGroup, breathTarget, 0.5f));
-
-            if (ritualActive)
-            {
-                SetBreathGuideActive(true);
-            }
+            SetAmbientVolume(ritualActive ? 0.3f : 0.6f);
+            SetBreathGuideActive(ritualActive);
         }
 
         public void PlayIntroductionAudio(LunarDay day)
         {
-            if (voiceSource != null)
-            {
-                AudioClip introClip = LoadClip($"Intro_Day{(int)day}");
-                if (introClip != null)
-                {
-                    voiceSource.clip = introClip;
-                    voiceSource.Play();
-                }
-            }
+            PlayVoiceClip($"Intro_Day{(int)day}");
         }
 
         public void PlayNarrative(string clipName)
         {
-            if (voiceSource != null)
-            {
-                AudioClip clip = LoadClip(clipName);
-                if (clip != null)
-                {
-                    voiceSource.Stop();
-                    voiceSource.clip = clip;
-                    voiceSource.Play();
-                }
-            }
+            PlayVoiceClip(clipName);
         }
 
         public void PlayRitualAudio(string clipName)
         {
-            if (voiceSource != null)
-            {
-                AudioClip clip = LoadClip(clipName);
-                if (clip != null)
-                {
-                    voiceSource.clip = clip;
-                    voiceSource.Play();
-                }
-            }
+            PlayVoiceClip(clipName);
         }
 
         public void PlayTransitionSound()
         {
-            PlayHighFreqAlert();
-        }
-
-        public void PlayHighFreqAlert()
-        {
             if (sfxSource != null)
             {
-                sfxSource.PlayOneShot(GetOrCreateTone(2200f, 0.5f), 0.3f);
+                sfxSource.PlayOneShot(GetOrCreateTone(880f, 0.2f), 0.25f);
             }
         }
 
-        public void PlayInteractionFeedback(ResourceType resource)
+        public void PlayInteractionFeedback(ResourceType resourceType)
         {
-            if (sfxSource != null)
+            if (sfxSource == null)
             {
-                float freq = GetResourceFrequency(resource);
-                sfxSource.PlayOneShot(GetOrCreateTone(freq, 0.3f), 0.4f);
+                return;
             }
-        }
 
-        private float GetResourceFrequency(ResourceType resource)
-        {
-            switch (resource)
+            float frequency = 220f;
+
+            switch (resourceType)
             {
-                case ResourceType.Energy: return 220f;
-                case ResourceType.Oxygen: return 330f;
-                case ResourceType.Water: return 440f;
-                default: return 440f;
+                case ResourceType.Oxygen:
+                    frequency = 330f;
+                    break;
+                case ResourceType.Water:
+                    frequency = 440f;
+                    break;
             }
+
+            sfxSource.PlayOneShot(GetOrCreateTone(frequency, 0.15f), 0.2f);
         }
 
         public void PlayRitualCompletion()
         {
             if (sfxSource != null)
             {
-                sfxSource.PlayOneShot(GetOrCreateTone(880f, 1f), 0.5f);
+                sfxSource.PlayOneShot(GetOrCreateTone(660f, 0.35f), 0.25f);
             }
-            OnRitualAudioComplete?.Invoke();
+        }
+
+        private void PlayVoiceClip(string clipName)
+        {
+            if (voiceSource == null)
+            {
+                return;
+            }
+
+            AudioClip clip = LoadClip(clipName);
+            if (clip == null)
+            {
+                return;
+            }
+
+            voiceSource.Stop();
+            voiceSource.clip = clip;
+            voiceSource.Play();
+        }
+
+        private void EnsureClip(AudioSource source, string clipName)
+        {
+            if (source == null || source.clip != null)
+            {
+                return;
+            }
+
+            source.clip = LoadClip(clipName);
+        }
+
+        private void PlayIfReady(AudioSource source)
+        {
+            if (source != null && source.clip != null && !source.isPlaying)
+            {
+                source.Play();
+            }
+        }
+
+        private void ToggleLoopSource(AudioSource source, bool shouldPlay)
+        {
+            if (source == null || source.clip == null)
+            {
+                return;
+            }
+
+            if (shouldPlay)
+            {
+                if (!source.isPlaying)
+                {
+                    source.Play();
+                }
+            }
+            else
+            {
+                source.Stop();
+            }
+        }
+
+        private AudioClip LoadClip(string clipName)
+        {
+            if (string.IsNullOrWhiteSpace(clipName))
+            {
+                return null;
+            }
+
+            if (clipCache.TryGetValue(clipName, out var cachedClip))
+            {
+                return cachedClip;
+            }
+
+            AudioClip loadedClip = Resources.Load<AudioClip>($"Audio/{clipName}");
+            if (loadedClip != null)
+            {
+                clipCache[clipName] = loadedClip;
+            }
+
+            return loadedClip;
         }
 
         private AudioClip GetOrCreateTone(float frequency, float duration)
         {
             int sampleRate = 44100;
-            int sampleCount = (int)(sampleRate * duration);
+            int sampleCount = Mathf.CeilToInt(sampleRate * duration);
             float[] samples = new float[sampleCount];
 
-            for (int i = 0; i < sampleCount; i++)
+            for (int index = 0; index < sampleCount; index++)
             {
-                samples[i] = Mathf.Sin(2f * Mathf.PI * frequency * i / sampleRate) * Mathf.Exp(-3f * i / sampleCount);
+                float sampleTime = index / (float)sampleRate;
+                samples[index] = Mathf.Sin(2f * Mathf.PI * frequency * sampleTime) * Mathf.Exp(-3f * sampleTime);
             }
 
-            AudioClip clip = AudioClip.Create($"Tone_{frequency}", sampleCount, 1, sampleRate, false);
+            AudioClip clip = AudioClip.Create($"Tone_{frequency}_{duration}", sampleCount, 1, sampleRate, false);
             clip.SetData(samples, 0);
             return clip;
         }
 
-        private AudioClip LoadClip(string clipName)
+        private float ToMixerDb(float normalizedVolume)
         {
-            if (clipCache.TryGetValue(clipName, out var cached))
+            if (normalizedVolume <= 0.0001f)
             {
-                return cached;
+                return -80f;
             }
 
-            AudioClip loaded = Resources.Load<AudioClip>($"Audio/{clipName}");
-            if (loaded != null)
-            {
-                clipCache[clipName] = loaded;
-            }
-            return loaded;
-        }
-
-        private void HandleSpatialAudio()
-        {
-            Transform playerCam = Camera.main?.transform;
-            if (playerCam == null) return;
-
-            foreach (var source in activeLoopingSources)
-            {
-                if (source != null && source.spatialBlend > 0)
-                {
-                    source.spatialBlend = Mathf.Lerp(source.spatialBlend, 1f, Time.deltaTime);
-                }
-            }
+            return Mathf.Log10(Mathf.Clamp01(normalizedVolume)) * 20f;
         }
 
         public void SetMasterVolume(float volume)
         {
             masterVolume = Mathf.Clamp01(volume);
-            mainMixer?.SetFloat("MasterVolume", Mathf.Log10(masterVolume) * 20f);
+            mainMixer?.SetFloat("MasterVolume", ToMixerDb(masterVolume));
         }
 
         public void SetAmbientVolume(float volume)
         {
             ambientVolume = Mathf.Clamp01(volume);
-            mainMixer?.SetFloat("AmbientVolume", Mathf.Log10(ambientVolume) * 20f);
+            mainMixer?.SetFloat("AmbientVolume", ToMixerDb(ambientVolume));
+        }
+
+        public void SetBreathVolume(float volume)
+        {
+            breathVolume = Mathf.Clamp01(volume);
+            mainMixer?.SetFloat("BreathVolume", ToMixerDb(breathVolume));
         }
 
         public void SetVoiceVolume(float volume)
         {
             voiceVolume = Mathf.Clamp01(volume);
-            mainMixer?.SetFloat("VoiceVolume", Mathf.Log10(voiceVolume) * 20f);
-        }
-
-        private System.Collections.IEnumerator SmoothVolumeChange(AudioMixerGroup group, float targetVolume, float duration)
-        {
-            float startVolume = group.audioMixer?.GetFloat($"{group.name}Volume", out float current) == true ? current : 0f;
-            float elapsed = 0f;
-
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = elapsed / duration;
-                float volume = Mathf.Lerp(startVolume, Mathf.Log10(targetVolume) * 20f, t);
-                group.audioMixer?.SetFloat($"{group.name}Volume", volume);
-                yield return null;
-            }
+            mainMixer?.SetFloat("VoiceVolume", ToMixerDb(voiceVolume));
         }
 
         public void StopAllAudio()
         {
+            foreach (AudioSource source in loopingSources)
+            {
+                if (source != null)
+                {
+                    source.Stop();
+                }
+            }
+
             voiceSource?.Stop();
             sfxSource?.Stop();
-            SetBreathGuideActive(false);
-            SetRitualMode(false);
+            isBreathGuideActive = false;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
     }
 }

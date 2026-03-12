@@ -1,6 +1,6 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
+using Lunar.Data;
 using UnityEngine;
 
 namespace Lunar.Core
@@ -9,34 +9,25 @@ namespace Lunar.Core
     {
         public static RitualEngine Instance { get; private set; }
 
-        [Header("Ritual Settings")]
-        [SerializeField] private float deepRitualDuration = 420f;
-        [SerializeField] private float normalRitualDuration = 180f;
-        [SerializeField] private float interactionCooldown = 2f;
-
-        [Header("Voice Scripts")]
-        [SerializeField] private TextAsset enterScript;
-        [SerializeField] private TextAsset anchorScript;
-        [SerializeField] private TextAsset orderScript;
-        [SerializeField] private TextAsset observeScript;
-        [SerializeField] private TextAsset exitScript;
-
-        [Header("Visual Elements")]
+        [Header("Ritual Presentation")]
         [SerializeField] private GameObject ritualIndicator;
         [SerializeField] private Light[] ritualLights;
         [SerializeField] private Material valveMaterial;
 
-        private RitualPhase currentPhase = RitualPhase.None;
-        private float phaseTimer;
-        private bool isRitualActive;
-        private bool isDeepRitual;
-        private LunarDay currentRitualDay;
+        [Header("Interaction Settings")]
+        [SerializeField] private float interactionCooldown = 1f;
 
+        private RitualConfig currentRitualConfig;
+        private RitualPhaseConfig currentPhaseConfig;
+        private RitualPhase currentPhase = RitualPhase.None;
+        private LunarDay currentRitualDay = LunarDay.Day1_Arrival;
+        private Coroutine ritualRoutine;
+        private bool isRitualActive;
+        private bool phaseInteractionSatisfied;
         private int interactionCount;
         private float lastInteractionTime;
         private float ritualStartTime;
-
-        private Dictionary<RitualPhase, RitualPhaseConfig> phaseConfigs;
+        private float totalRitualDuration;
 
         public event Action<RitualPhase> OnPhaseChanged;
         public event Action<RitualPhase, float> OnPhaseProgress;
@@ -45,29 +36,14 @@ namespace Lunar.Core
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
 
-            InitializePhaseConfigs();
-        }
-
-        private void InitializePhaseConfigs()
-        {
-            phaseConfigs = new Dictionary<RitualPhase, RitualPhaseConfig>
-            {
-                { RitualPhase.Enter, new RitualPhaseConfig { durationSeconds = 30f, requiresInteraction = false } },
-                { RitualPhase.Anchor, new RitualPhaseConfig { durationSeconds = 90f, requiresInteraction = false } },
-                { RitualPhase.Order, new RitualPhaseConfig { durationSeconds = 60f, requiresInteraction = true } },
-                { RitualPhase.Observe, new RitualPhaseConfig { durationSeconds = 120f, requiresInteraction = false } },
-                { RitualPhase.Exit, new RitualPhaseConfig { durationSeconds = 30f, requiresInteraction = false } }
-            };
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
         }
 
         private void Start()
@@ -78,52 +54,96 @@ namespace Lunar.Core
             }
         }
 
-        public void StartDayRitual(LunarDay day)
+        public void StartDayRitual(LunarDay day, RitualConfig config)
         {
+            if (config == null || config.phases.Count == 0)
+            {
+                LunarDayStateMachine.Instance?.NotifyRitualCompleted();
+                return;
+            }
+
+            StopCurrentRitual();
+
             currentRitualDay = day;
-            isDeepRitual = (day == LunarDay.Day5_Ritual);
+            currentRitualConfig = config;
+            currentPhase = RitualPhase.None;
+            currentPhaseConfig = null;
             isRitualActive = true;
             interactionCount = 0;
             ritualStartTime = Time.time;
+            totalRitualDuration = CalculateTotalDuration(config);
 
+            ShowRitualIndicator();
+            DimBaseLights();
             AudioTherapyEngine.Instance?.SetRitualMode(true);
             ResourceManager.Instance?.DisableManagement();
 
-            EnterPhase(RitualPhase.Enter);
+            ritualRoutine = StartCoroutine(RunRitual());
             OnRitualStarted?.Invoke();
-
-            ShowRitualIndicator();
         }
 
         public void SkipRitual()
         {
-            if (!isRitualActive) return;
+            if (!isRitualActive)
+            {
+                return;
+            }
 
             CompleteRitual(false);
         }
 
-        public void CheckRitualComplete()
+        private IEnumerator RunRitual()
         {
-            if (!isRitualActive) return;
-
-            float ritualDuration = isDeepRitual ? deepRitualDuration : normalRitualDuration;
-            if (Time.time - ritualStartTime >= ritualDuration)
+            foreach (RitualPhaseConfig phase in currentRitualConfig.phases)
             {
-                if (currentPhase == RitualPhase.Exit)
+                currentPhase = phase.phase;
+                currentPhaseConfig = phase;
+                phaseInteractionSatisfied = !phase.requiresInteraction;
+
+                EnterPhasePresentation(phase);
+                OnPhaseChanged?.Invoke(currentPhase);
+
+                float elapsed = 0f;
+                while (elapsed < phase.durationSeconds)
                 {
-                    CompleteRitual(true);
-                }
-                else if (currentPhase == RitualPhase.Observe)
-                {
-                    EnterPhase(RitualPhase.Exit);
+                    elapsed += Time.deltaTime;
+                    OnPhaseProgress?.Invoke(currentPhase, Mathf.Clamp01(elapsed / phase.durationSeconds));
+                    yield return null;
                 }
             }
+
+            CompleteRitual(true);
+        }
+
+        private void EnterPhasePresentation(RitualPhaseConfig phase)
+        {
+            if (phase.requiresInteraction)
+            {
+                ShowValveInteraction();
+            }
+            else
+            {
+                HideValveInteraction();
+            }
+
+            string clipName = string.IsNullOrWhiteSpace(phase.audioClipName)
+                ? $"Ritual_{phase.phase}"
+                : phase.audioClipName;
+            AudioTherapyEngine.Instance?.PlayRitualAudio(clipName);
         }
 
         public void PerformRitualInteraction(string targetName)
         {
-            if (!isRitualActive) return;
-            if (currentPhase != RitualPhase.Order) return;
+            if (!isRitualActive || currentPhaseConfig == null || !currentPhaseConfig.requiresInteraction)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(currentPhaseConfig.interactionTarget) &&
+                !string.Equals(currentPhaseConfig.interactionTarget, targetName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
             if (Time.time - lastInteractionTime < interactionCooldown)
             {
@@ -132,9 +152,11 @@ namespace Lunar.Core
 
             lastInteractionTime = Time.time;
             interactionCount++;
+            phaseInteractionSatisfied = true;
 
             AudioTherapyEngine.Instance?.PlayInteractionFeedback(ResourceType.Energy);
-            StartCoroutine(AnimateInteraction(targetName));
+            UserSessionManager.Instance?.RecordInteraction();
+            StartCoroutine(AnimateInteraction());
         }
 
         public void PerformValveInteraction()
@@ -142,161 +164,70 @@ namespace Lunar.Core
             PerformRitualInteraction("valve");
         }
 
-        private void EnterPhase(RitualPhase phase)
+        private IEnumerator AnimateInteraction()
         {
-            currentPhase = phase;
-            phaseTimer = 0f;
-
-            OnPhaseChanged?.Invoke(phase);
-
-            float phaseDuration = phaseConfigs.ContainsKey(phase) ?
-                phaseConfigs[phase].durationSeconds :
-                (isDeepRitual && phase == RitualPhase.Observe ? 120f : 60f);
-
-            StartCoroutine(ExecutePhase(phase, phaseDuration));
-        }
-
-        private IEnumerator ExecutePhase(RitualPhase phase, float duration)
-        {
-            switch (phase)
+            if (valveMaterial != null)
             {
-                case RitualPhase.Enter:
-                    yield return ExecuteEnterPhase(duration);
-                    break;
-                case RitualPhase.Anchor:
-                    yield return ExecuteAnchorPhase(duration);
-                    break;
-                case RitualPhase.Order:
-                    yield return ExecuteOrderPhase(duration);
-                    break;
-                case RitualPhase.Observe:
-                    yield return ExecuteObservePhase(duration);
-                    break;
-                case RitualPhase.Exit:
-                    yield return ExecuteExitPhase(duration);
-                    break;
+                valveMaterial.EnableKeyword("_EMISSION");
+                valveMaterial.SetColor("_EmissionColor", Color.cyan * 2f);
+            }
+
+            yield return new WaitForSeconds(0.2f);
+
+            if (!isRitualActive || currentPhaseConfig == null || !currentPhaseConfig.requiresInteraction)
+            {
+                HideValveInteraction();
             }
         }
 
-        private IEnumerator ExecuteEnterPhase(float duration)
+        private void CompleteRitual(bool completed)
         {
-            DimBaseLights();
-
-            string script = GetScriptForPhase(RitualPhase.Enter);
-            if (!string.IsNullOrEmpty(script))
-            {
-                PlayVoiceover(script);
-            }
-
-            yield return WaitWithProgress(duration);
-
-            EnterPhase(RitualPhase.Anchor);
-        }
-
-        private IEnumerator ExecuteAnchorPhase(float duration)
-        {
-            AudioTherapyEngine.Instance?.SetBreathGuideActive(true);
-
-            string script = GetScriptForPhase(RitualPhase.Anchor);
-            if (!string.IsNullOrEmpty(script))
-            {
-                PlayVoiceover(script);
-            }
-
-            yield return WaitWithProgress(duration);
-
-            EnterPhase(RitualPhase.Order);
-        }
-
-        private IEnumerator ExecuteOrderPhase(float duration)
-        {
-            ShowValveInteraction();
-
-            string script = GetScriptForPhase(RitualPhase.Order);
-            if (!string.IsNullOrEmpty(script))
-            {
-                PlayVoiceover(script);
-            }
-
-            yield return WaitWithProgress(duration);
-
-            EnterPhase(RitualPhase.Observe);
-        }
-
-        private IEnumerator ExecuteObservePhase(float duration)
-        {
+            StopCurrentRitual();
+            RestoreBaseLights();
+            HideRitualIndicator();
             HideValveInteraction();
 
-            string script = GetScriptForPhase(RitualPhase.Observe);
-            if (!string.IsNullOrEmpty(script))
+            AudioTherapyEngine.Instance?.SetRitualMode(false);
+            AudioTherapyEngine.Instance?.PlayRitualCompletion();
+
+            UserSessionManager.Instance?.RecordRitualCompletion(
+                currentRitualDay,
+                currentPhase,
+                completed,
+                interactionCount);
+
+            OnRitualCompleted?.Invoke(new RitualCompletionResult
             {
-                PlayVoiceover(script);
-            }
+                day = currentRitualDay,
+                completed = completed,
+                interactionCount = interactionCount,
+                duration = Time.time - ritualStartTime
+            });
 
-            yield return WaitWithProgress(duration);
-
-            EnterPhase(RitualPhase.Exit);
+            LunarDayStateMachine.Instance?.NotifyRitualCompleted();
         }
 
-        private IEnumerator ExecuteExitPhase(float duration)
+        private void StopCurrentRitual()
         {
-            string script = GetScriptForPhase(RitualPhase.Exit);
-            if (!string.IsNullOrEmpty(script))
+            if (ritualRoutine != null)
             {
-                PlayVoiceover(script);
+                StopCoroutine(ritualRoutine);
+                ritualRoutine = null;
             }
 
-            yield return WaitWithProgress(duration);
-
-            CompleteRitual(true);
+            isRitualActive = false;
         }
 
-        private IEnumerator WaitWithProgress(float duration)
+        private float CalculateTotalDuration(RitualConfig config)
         {
-            float elapsed = 0f;
-            while (elapsed < duration)
+            float duration = 0f;
+
+            foreach (RitualPhaseConfig phase in config.phases)
             {
-                elapsed += Time.deltaTime;
-                float progress = elapsed / duration;
-                OnPhaseProgress?.Invoke(currentPhase, progress);
-                yield return null;
-            }
-        }
-
-        private void PlayVoiceover(string script)
-        {
-            AudioTherapyEngine.Instance?.PlayRitualAudio("Ritual_" + currentPhase.ToString());
-        }
-
-        private void DimBaseLights()
-        {
-            foreach (var light in ritualLights)
-            {
-                StartCoroutine(SmoothLightDim(light, 0.3f, 2f));
-            }
-        }
-
-        private void RestoreBaseLights()
-        {
-            foreach (var light in ritualLights)
-            {
-                StartCoroutine(SmoothLightDim(light, 1f, 2f));
-            }
-        }
-
-        private IEnumerator SmoothLightDim(Light light, float targetIntensity, float duration)
-        {
-            float startIntensity = light.intensity;
-            float elapsed = 0f;
-
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                light.intensity = Mathf.Lerp(startIntensity, targetIntensity, elapsed / duration);
-                yield return null;
+                duration += phase.durationSeconds;
             }
 
-            light.intensity = targetIntensity;
+            return Mathf.Max(duration, 1f);
         }
 
         private void ShowRitualIndicator()
@@ -320,7 +251,7 @@ namespace Lunar.Core
             if (valveMaterial != null)
             {
                 valveMaterial.EnableKeyword("_EMISSION");
-                valveMaterial.SetColor("_EmissionColor", Color.cyan * 2f);
+                valveMaterial.SetColor("_EmissionColor", Color.cyan * 1.5f);
             }
         }
 
@@ -332,56 +263,36 @@ namespace Lunar.Core
             }
         }
 
-        private IEnumerator AnimateInteraction(string targetName)
+        private void DimBaseLights()
         {
-            float animDuration = 0.5f;
-            float elapsed = 0f;
-
-            while (elapsed < animDuration)
+            if (ritualLights == null)
             {
-                elapsed += Time.deltaTime;
-                yield return null;
+                return;
+            }
+
+            foreach (Light light in ritualLights)
+            {
+                if (light != null)
+                {
+                    light.intensity = 0.3f;
+                }
             }
         }
 
-        private void CompleteRitual(bool completed)
+        private void RestoreBaseLights()
         {
-            isRitualActive = false;
-
-            RestoreBaseLights();
-            HideRitualIndicator();
-            HideValveInteraction();
-
-            AudioTherapyEngine.Instance?.SetRitualMode(false);
-            AudioTherapyEngine.Instance?.PlayRitualCompletion();
-
-            UserSessionManager.Instance?.RecordRitualCompletion(currentRitualDay, currentPhase, completed, interactionCount);
-
-            var result = new RitualCompletionResult
+            if (ritualLights == null)
             {
-                day = currentRitualDay,
-                completed = completed,
-                interactionCount = interactionCount,
-                duration = Time.time - ritualStartTime
-            };
-
-            OnRitualCompleted?.Invoke(result);
-
-            LunarDayStateMachine.Instance?.SkipToNextState();
-        }
-
-        private string GetScriptForPhase(RitualPhase phase)
-        {
-            TextAsset asset = null;
-            switch (phase)
-            {
-                case RitualPhase.Enter: asset = enterScript; break;
-                case RitualPhase.Anchor: asset = anchorScript; break;
-                case RitualPhase.Order: asset = orderScript; break;
-                case RitualPhase.Observe: asset = observeScript; break;
-                case RitualPhase.Exit: asset = exitScript; break;
+                return;
             }
-            return asset != null ? asset.text : string.Empty;
+
+            foreach (Light light in ritualLights)
+            {
+                if (light != null)
+                {
+                    light.intensity = 1f;
+                }
+            }
         }
 
         public bool IsRitualActive()
@@ -396,19 +307,21 @@ namespace Lunar.Core
 
         public float GetRitualProgress()
         {
-            if (!isRitualActive) return 0f;
-            float totalDuration = (isDeepRitual ? deepRitualDuration : normalRitualDuration);
-            return Mathf.Clamp01((Time.time - ritualStartTime) / totalDuration);
-        }
-    }
+            if (!isRitualActive)
+            {
+                return 0f;
+            }
 
-    public class RitualPhaseConfig
-    {
-        public float durationSeconds;
-        public string audioClipName;
-        public string voiceoverScript;
-        public bool requiresInteraction;
-        public string interactionTarget;
+            return Mathf.Clamp01((Time.time - ritualStartTime) / totalRitualDuration);
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
     }
 
     public struct RitualCompletionResult

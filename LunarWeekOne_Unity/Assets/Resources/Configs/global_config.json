@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "targetFrameRate": 60,
+  "enableVsync": true,
+  "days": [],
+  "audioMix": {
+    "mixName": "LunarDefault",
+    "layers": [
+      {
+        "layerName": "LowFrequencyHum",
+        "clipResourcePath": "Audio/ambient_low",
+        "volume": 0.6,
+        "pitch": 1.0,
+        "loop": true,
+        "spatial": false,
+        "spatialBlend": 0.0,
+        "minDistance": 1.0,
+        "maxDistance": 10.0
+      },
+      {
+        "layerName": "BreathGuide",
+        "clipResourcePath": "Audio/breath_60bpm",
+        "volume": 0.45,
+        "pitch": 1.0,
+        "loop": true,
+        "spatial": false,
+        "spatialBlend": 0.0,
+        "minDistance": 1.0,
+        "maxDistance": 10.0
+      }
+    ],
+    "globalVolume": 1.0
+  },
+  "lightFadeDuration": 2.0,
+  "interactionResponseDelay": 0.4
+}

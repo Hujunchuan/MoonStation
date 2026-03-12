@@ -16,50 +16,51 @@ namespace Lunar.Core
         [SerializeField] private Slider ritualComfortSlider;
         [SerializeField] private Slider presenceSlider;
         [SerializeField] private Slider worldFeelingSlider;
-
         [SerializeField] private Text feedbackSummaryText;
         [SerializeField] private Button submitFeedbackButton;
 
-        private Dictionary<string, float> feedbackScores = new Dictionary<string, float>();
+        private readonly Dictionary<string, float> feedbackScores = new Dictionary<string, float>();
         private bool isCollectingFeedback;
 
         public event Action<Dictionary<string, float>> OnFeedbackSubmitted;
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
+
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
 
             if (feedbackCanvas != null)
             {
                 feedbackCanvas.gameObject.SetActive(false);
             }
+
+            RegisterConfiguredUi();
         }
 
         public void StartFeedbackCollection()
         {
             if (feedbackCanvas == null)
             {
-                Debug.LogWarning("[FeedbackCollector] Feedback canvas not assigned");
+                Debug.LogWarning("[ExperienceFeedbackCollector] Feedback canvas is not assigned");
                 return;
             }
 
             isCollectingFeedback = true;
 
-            if (calmnessSlider != null) calmnessSlider.value = 3f;
-            if (desireSlider != null) desireSlider.value = inf3f;
-            if (ritualComfortSlider != null) ritualComfortSlider.value = 3f;
-            if (presenceSlider != null) presenceSlider.value = 3f;
-            if (worldFeelingSlider != null) worldFeelingSlider.value = 3f;
+            SetSliderValue(calmnessSlider, 3f);
+            SetSliderValue(desireSlider, 3f);
+            SetSliderValue(ritualComfortSlider, 3f);
+            SetSliderValue(presenceSlider, 3f);
+            SetSliderValue(worldFeelingSlider, 3f);
 
             feedbackCanvas.gameObject.SetActive(true);
+            UpdateFeedbackSummary();
 
             if (submitFeedbackButton != null)
             {
@@ -68,38 +69,28 @@ namespace Lunar.Core
             }
         }
 
-        private void UpdateFeedbackSummary()
+        public void CollectFinalFeedback()
         {
-            if (feedbackSummaryText == null) return;
-
-            string summary = "Feedback Summary:\n\n";
-
-            summary += $"Calmness: {(calmnessSlider != null ? calmnessSlider.value : 0f):F1}/5.0\n";
-            summary += $"Desire to Check Phone: {(desireSlider != null ? desireSlider.value : 0f):F1}/5.0\n";
-            summary += $"Ritual Comfort: {(ritualComfortSlider != null ? ritualComfortSlider.value : 0f):F1}/5.0\n";
-            summary += $"Sense of Presence: {(presenceSlider != null ? presenceSlider.value : 0f):F1}/5.0\n";
-            summary += $"World Feeling: {(worldFeelingSlider != null ? worldFeelingSlider.value : 0f):F1}/5.0\n";
-
-            feedbackSummaryText.text = summary;
+            StartFeedbackCollection();
         }
 
         public void SubmitFeedback()
         {
-            if (!isCollectingFeedback) return;
+            if (!isCollectingFeedback)
+            {
+                return;
+            }
 
-            feedbackScores["Calmness"] = calmnessSlider != null ? calmnessSlider.value : 0f;
-            feedbackScores["PhoneDesire"] = desireSlider != null ? desireSlider.value : 0f;
-            feedbackScores["RitualComfort"] = ritualComfortSlider != null ? ritualComfortSlider.value : 0f;
-            feedbackScores["Presence"] = presenceSlider != null ? presenceSlider.value : 0f;
-            feedbackScores["WorldFeeling"] = worldFeelingSlider != null ? worldFeelingSlider.value : 0f;
-
-            float averageScore = CalculateAverageScore();
-            feedbackScores["Average"] = averageScore;
+            feedbackScores["Calmness"] = GetSliderValue(calmnessSlider);
+            feedbackScores["PhoneDesire"] = GetSliderValue(desireSlider);
+            feedbackScores["RitualComfort"] = GetSliderValue(ritualComfortSlider);
+            feedbackScores["Presence"] = GetSliderValue(presenceSlider);
+            feedbackScores["WorldFeeling"] = GetSliderValue(worldFeelingSlider);
+            feedbackScores["Average"] = CalculateAverageScore();
 
             UserSessionManager.Instance?.SetMoodMarkers(
-                (int)(feedbackScores["Presence"]),
-                (int)(feedbackScores["Calmness"])
-            );
+                Mathf.RoundToInt(feedbackScores["Presence"]),
+                Mathf.RoundToInt(feedbackScores["Calmness"]));
 
             if (feedbackCanvas != null)
             {
@@ -107,73 +98,34 @@ namespace Lunar.Core
             }
 
             isCollectingFeedback = false;
-
-            LogFeedbackResults();
-            OnFeedbackSubmitted?.Invoke(feedbackScores);
-
+            OnFeedbackSubmitted?.Invoke(new Dictionary<string, float>(feedbackScores));
             UserSessionManager.Instance?.EndSession();
         }
 
-        public void CollectFinalFeedback()
+        private void UpdateFeedbackSummary()
         {
-            StartFeedbackCollection();
+            if (feedbackSummaryText == null)
+            {
+                return;
+            }
+
+            feedbackSummaryText.text =
+                "Feedback Summary\n\n" +
+                $"Calmness: {GetSliderValue(calmnessSlider):F1}/5.0\n" +
+                $"Phone Desire: {GetSliderValue(desireSlider):F1}/5.0\n" +
+                $"Ritual Comfort: {GetSliderValue(ritualComfortSlider):F1}/5.0\n" +
+                $"Presence: {GetSliderValue(presenceSlider):F1}/5.0\n" +
+                $"World Feeling: {GetSliderValue(worldFeelingSlider):F1}/5.0";
         }
 
         private float CalculateAverageScore()
         {
-            float sum = 0f;
-            int count = 0;
+            float sum = feedbackScores["Calmness"] +
+                        feedbackScores["RitualComfort"] +
+                        feedbackScores["Presence"] +
+                        feedbackScores["WorldFeeling"];
 
-            if (feedbackScores.ContainsKey("Calmness"))
-            {
-                sum += feedbackScores["Calmness"];
-                count++;
-            }
-
-            if (feedbackScores.ContainsKey("RitualComfort"))
-            {
-                sum += feedbackScores["RitualComfort"];
-                count++;
-            }
-
-            if (feedbackScores.ContainsKey("Presence"))
-            {
-                sum += feedbackScores["Presence"];
-                count++;
-            }
-
-            if (feedbackScores.ContainsKey("WorldFeeling"))
-            {
-                sum += feedbackScores["WorldFeeling"];
-                count++;
-            }
-
-            return count > 0 ? sum / count : 0f;
-        }
-
-        private void LogFeedbackResults()
-        {
-            Debug.Log($"[FeedbackCollector] Feedback Submitted:");
-            foreach (var kvp in feedbackScores)
-            {
-                Debug.Log($"{kvp.Key}: {kvp.Value:F2}");
-            }
-
-            float average = feedbackScores.ContainsKey("Average") ? feedbackScores["Average"] : 0f;
-            Debug.Log($"[FeedbackCollector] Average Score: {average:F2}/5.0");
-
-            if (average >= 4.0f)
-            {
-                Debug.Log("[FeedbackCollector] ✓ MVP Success: Average score ≥ 4.0");
-            }
-            else if (average >= 3.0f)
-            {
-                Debug.Log("[FeedbackCollector] ⚠ Needs Improvement: Average score 3.0-4.0");
-            }
-            else
-            {
-                Debug.Log("[FeedbackCollector] ✗ Below Target: Average score < 3.0");
-            }
+            return sum / 4f;
         }
 
         public bool IsCollectingFeedback()
@@ -193,13 +145,82 @@ namespace Lunar.Core
 
         public bool IsMVPSuccessful()
         {
-            float calmness = feedbackScores.ContainsKey("Calmness") ? feedbackScores["Calmness"] : 0f;
-            float desire = feedbackScores.ContainsKey("PhoneDesire") ? feedbackScores["PhoneDesire"] : 0f;
-            float ritualComfort = feedbackScores.ContainsKey("RitualComfort") ? feedbackScores["RitualComfort"] : 0f;
-            float presence = feedbackScores.ContainsKey("Presence") ? feedbackScores["Presence"] : 0f;
-            float worldFeeling = feedbackScores.ContainsKey("WorldFeeling") ? feedbackScores["WorldFeeling"] : 0f;
+            return feedbackScores.ContainsKey("Average") &&
+                   feedbackScores["Average"] >= 4f &&
+                   feedbackScores["PhoneDesire"] <= 2f;
+        }
 
-            return calmness >= 4.0f && desire <= 2.0f && ritualComfort >= 4.0f && presence >= 4.0f && worldFeeling >= 4.0f;
+        public void ConfigureUi(
+            Canvas canvas,
+            Slider calmness,
+            Slider desire,
+            Slider ritualComfort,
+            Slider presence,
+            Slider worldFeeling,
+            Text summary,
+            Button submit)
+        {
+            feedbackCanvas = canvas;
+            calmnessSlider = calmness;
+            desireSlider = desire;
+            ritualComfortSlider = ritualComfort;
+            presenceSlider = presence;
+            worldFeelingSlider = worldFeeling;
+            feedbackSummaryText = summary;
+            submitFeedbackButton = submit;
+
+            if (feedbackCanvas != null)
+            {
+                feedbackCanvas.gameObject.SetActive(false);
+            }
+
+            RegisterConfiguredUi();
+        }
+
+        private void RegisterConfiguredUi()
+        {
+            RegisterSlider(calmnessSlider);
+            RegisterSlider(desireSlider);
+            RegisterSlider(ritualComfortSlider);
+            RegisterSlider(presenceSlider);
+            RegisterSlider(worldFeelingSlider);
+        }
+
+        private void RegisterSlider(Slider slider)
+        {
+            if (slider == null)
+            {
+                return;
+            }
+
+            slider.onValueChanged.RemoveListener(OnSliderValueChanged);
+            slider.onValueChanged.AddListener(OnSliderValueChanged);
+        }
+
+        private void OnSliderValueChanged(float value)
+        {
+            UpdateFeedbackSummary();
+        }
+
+        private void SetSliderValue(Slider slider, float value)
+        {
+            if (slider != null)
+            {
+                slider.value = value;
+            }
+        }
+
+        private float GetSliderValue(Slider slider)
+        {
+            return slider != null ? slider.value : 0f;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
     }
 }

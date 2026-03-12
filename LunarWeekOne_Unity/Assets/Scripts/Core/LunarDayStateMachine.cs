@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Lunar.Data;
 using UnityEngine;
 
 namespace Lunar.Core
@@ -9,205 +10,239 @@ namespace Lunar.Core
         public static LunarDayStateMachine Instance { get; private set; }
 
         public LunarDay CurrentDay { get; private set; } = LunarDay.Day1_Arrival;
-        public LunarDayState CurrentState { get; private set; }
+        public LunarDayState CurrentState { get; private set; } = LunarDayState.None;
         public float CurrentDayElapsed { get; private set; }
         public float CurrentDayTargetDuration { get; private set; }
 
         public event Action<LunarDay> OnDayChanged;
         public event Action<LunarDayState> OnStateChanged;
         public event Action<float> OnDayProgressUpdated;
-        public event Action OnDayCompleted;
+        public event Action<LunarDay> OnDayCompleted;
+        public event Action OnExperienceCompleted;
 
-        private Dictionary<LunarDay, LunarDayConfig> dayConfigs;
+        private Dictionary<LunarDay, LunarDayConfig> dayConfigs = new Dictionary<LunarDay, LunarDayConfig>();
         private float stateTimer;
+        private bool isInitialized;
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
+
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
         }
 
-        public void Initialize(Dictionary<LunarDay, LunarDayConfig> configs)
+        public void Initialize(Dictionary<LunarDay, LunarDayConfig> configs, LunarDay startDay)
         {
-            dayConfigs = configs;
-            EnterDay(LunarDay.Day1_Arrival);
+            dayConfigs = configs ?? new Dictionary<LunarDay, LunarDayConfig>();
+            isInitialized = dayConfigs.Count > 0;
+
+            if (!isInitialized)
+            {
+                Debug.LogError("[LunarDayStateMachine] No day configs available");
+                return;
+            }
+
+            EnterDay(startDay);
         }
 
         public void EnterDay(LunarDay day)
         {
+            if (!dayConfigs.TryGetValue(day, out var config))
+            {
+                Debug.LogError($"[LunarDayStateMachine] Missing config for {day}");
+                return;
+            }
+
             CurrentDay = day;
             CurrentDayElapsed = 0f;
-            CurrentDayTargetDuration = dayConfigs.ContainsKey(day) ?
-                dayConfigs[day].targetDurationMinutes * 60f : 240f;
-
-            CurrentState = LunarDayState.Entering;
+            CurrentDayTargetDuration = Mathf.Max(60f, config.targetDurationMinutes * 60f);
             stateTimer = 0f;
 
             OnDayChanged?.Invoke(day);
             EnterState(LunarDayState.Introduction);
         }
 
+        public LunarDayConfig GetCurrentConfig()
+        {
+            dayConfigs.TryGetValue(CurrentDay, out var config);
+            return config;
+        }
+
         private void EnterState(LunarDayState state)
         {
             CurrentState = state;
             stateTimer = 0f;
-            OnStateChanged?.Invoke(state);
 
+            OnStateChanged?.Invoke(state);
             HandleStateEnter(state);
         }
 
         private void HandleStateEnter(LunarDayState state)
         {
+            LunarDayConfig config = GetCurrentConfig();
+
             switch (state)
             {
                 case LunarDayState.Introduction:
-                    PlayDayIntroduction();
+                    AudioTherapyEngine.Instance?.PlayIntroductionAudio(CurrentDay);
                     break;
-                case LunarDayState.ResourceManagement:
-                    EnableResourceManagement();
-                    break;
-                case LunarDayState.Ritual:
-                    StartRitual();
-                    break;
+
                 case LunarDayState.Narration:
-                    PlayNarrative();
+                    if (config != null)
+                    {
+                        foreach (string clip in config.narrativeClips)
+                        {
+                            AudioTherapyEngine.Instance?.PlayNarrative(clip);
+                        }
+                    }
                     break;
-                case LunarDayState.Transition:
-                    PrepareDayTransition();
+
+                case LunarDayState.Ritual:
+                    if (config?.ritual != null && config.enableRitual)
+                    {
+                        RitualEngine.Instance?.StartDayRitual(CurrentDay, config.ritual);
+                    }
+                    else
+                    {
+                        EnterState(LunarDayState.Completion);
+                    }
                     break;
+
                 case LunarDayState.Completion:
                     CompleteCurrentDay();
+                    break;
+
+                case LunarDayState.Transition:
+                    AudioTherapyEngine.Instance?.PlayTransitionSound();
                     break;
             }
         }
 
         private void Update()
         {
-            if (CurrentState == LunarDayState.None) return;
+            if (!isInitialized || CurrentState == LunarDayState.None || CurrentState == LunarDayState.Completion)
+            {
+                return;
+            }
 
             stateTimer += Time.deltaTime;
             CurrentDayElapsed += Time.deltaTime;
 
-            float progress = Mathf.Clamp01(CurrentDayElapsed / CurrentDayTargetDuration);
+            float progress = CurrentDayTargetDuration <= 0f
+                ? 0f
+                : Mathf.Clamp01(CurrentDayElapsed / CurrentDayTargetDuration);
             OnDayProgressUpdated?.Invoke(progress);
 
-            HandleStateUpdate(CurrentState);
-
             if (CurrentDayElapsed >= CurrentDayTargetDuration)
+            {
+                EnterState(LunarDayState.Completion);
+                return;
+            }
+
+            HandleStateUpdate();
+        }
+
+        private void HandleStateUpdate()
+        {
+            LunarDayConfig config = GetCurrentConfig();
+            if (config == null)
+            {
+                return;
+            }
+
+            switch (CurrentState)
+            {
+                case LunarDayState.Introduction:
+                    if (stateTimer >= config.introductionDurationSeconds)
+                    {
+                        EnterState(LunarDayState.ResourceManagement);
+                    }
+                    break;
+
+                case LunarDayState.ResourceManagement:
+                    if (stateTimer >= config.resourceDurationSeconds)
+                    {
+                        EnterState(GetPostResourceState(config));
+                    }
+                    break;
+
+                case LunarDayState.Narration:
+                    if (stateTimer >= config.narrationDurationSeconds)
+                    {
+                        EnterState(config.enableRitual ? LunarDayState.Ritual : LunarDayState.Completion);
+                    }
+                    break;
+            }
+        }
+
+        private LunarDayState GetPostResourceState(LunarDayConfig config)
+        {
+            if (config.enableNarration && config.narrativeClips.Count > 0)
+            {
+                return LunarDayState.Narration;
+            }
+
+            if (config.enableRitual)
+            {
+                return LunarDayState.Ritual;
+            }
+
+            return LunarDayState.Completion;
+        }
+
+        private void CompleteCurrentDay()
+        {
+            LunarDay finishedDay = CurrentDay;
+            OnDayCompleted?.Invoke(finishedDay);
+
+            if (finishedDay >= LunarDay.Day7_Reflection)
+            {
+                CurrentState = LunarDayState.None;
+                OnExperienceCompleted?.Invoke();
+                return;
+            }
+
+            EnterDay((LunarDay)((int)finishedDay + 1));
+        }
+
+        public void NotifyRitualCompleted()
+        {
+            if (CurrentState == LunarDayState.Ritual)
             {
                 EnterState(LunarDayState.Completion);
             }
         }
 
-        private void HandleStateUpdate(LunarDayState state)
-        {
-            switch (state)
-            {
-                case LunarDayState.Introduction:
-                    if (stateTimer >= 30f)
-                        EnterState(LunarDayState.ResourceManagement);
-                    break;
-
-                case LunarDayState.ResourceManagement:
-                    if (stateTimer >= 120f && CurrentDay != LunarDay.Day1_Arrival)
-                        EnterState(LunarDayState.Narration);
-                    break;
-
-                case LunarDayState.Narration:
-                    if (stateTimer >= 60f)
-                        EnterState(LunarDayState.Ritual);
-                    break;
-
-                case LunarDayState.Ritual:
-                    RitualEngine.Instance?.CheckRitualComplete();
-                    break;
-            }
-        }
-
-        private void PlayDayIntroduction()
-        {
-            AudioTherapyEngine.Instance?.PlayIntroductionAudio(CurrentDay);
-        }
-
-        private void EnableResourceManagement()
-        {
-            ResourceManager.Instance?.EnableManagement();
-        }
-
-        private void StartRitual()
-        {
-            RitualEngine.Instance?.StartDayRitual(CurrentDay);
-        }
-
-        private void PlayNarrative()
-        {
-            if (dayConfigs.TryGetValue(CurrentDay, out var config))
-            {
-                foreach (var clip in config.narrativeClips)
-                {
-                    AudioTherapyEngine.Instance?.PlayNarrative(clip);
-                }
-            }
-        }
-
-        private void PrepareDayTransition()
-        {
-            if (CurrentDay < LunarDay.Day7_Reflection)
-            {
-                AudioTherapyEngine.Instance?.PlayTransitionSound();
-            }
-        }
-
-        private void CompleteCurrentDay()
-        {
-            OnDayCompleted?.Invoke();
-
-            if (dayConfigs.TryGetValue(CurrentDay, out var config) && config.hasAnomaly)
-            {
-                TriggerAnomaly();
-            }
-
-            if (CurrentDay < LunarDay.Day7_Reflection)
-            {
-                EnterDay(CurrentDay + 1);
-            }
-            else
-            {
-                EndExperience();
-            }
-        }
-
-        private void TriggerAnomaly()
-        {
-            Debug.Log($"[LunarDayStateMachine] Anomaly triggered on {CurrentDay}");
-            ResourceManager.Instance?.TriggerAnomaly();
-        }
-
-        private void EndExperience()
-        {
-            Debug.Log("[LunarDayStateMachine] Experience completed");
-            ExperienceFeedbackCollector.Instance?.CollectFinalFeedback();
-        }
-
         public void SkipToNextState()
         {
+            LunarDayConfig config = GetCurrentConfig();
+            if (config == null)
+            {
+                return;
+            }
+
             switch (CurrentState)
             {
                 case LunarDayState.Introduction:
                     EnterState(LunarDayState.ResourceManagement);
                     break;
+
                 case LunarDayState.ResourceManagement:
-                    EnterState(LunarDayState.Narration);
+                    EnterState(GetPostResourceState(config));
                     break;
+
                 case LunarDayState.Narration:
-                    EnterState(LunarDayState.Ritual);
+                    EnterState(config.enableRitual ? LunarDayState.Ritual : LunarDayState.Completion);
+                    break;
+
+                case LunarDayState.Ritual:
+                case LunarDayState.Transition:
+                    EnterState(LunarDayState.Completion);
                     break;
             }
         }
@@ -216,6 +251,16 @@ namespace Lunar.Core
         {
             UserSessionManager.Instance?.SaveProgress();
             CurrentState = LunarDayState.None;
+            stateTimer = 0f;
+            isInitialized = false;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
     }
 
@@ -229,19 +274,5 @@ namespace Lunar.Core
         Ritual,
         Transition,
         Completion
-    }
-
-    [System.Serializable]
-    public class LunarDayConfig
-    {
-        public int dayNumber;
-        public string dayName;
-        public string theme;
-        public float targetDurationMinutes = 4f;
-        public List<string> narrativeClips = new List<string>();
-        public List<string> documentaryClips = new List<string>();
-        public RitualConfig ritual;
-        public bool hasAnomaly = false;
-        public float anomalyChance = 0f;
     }
 }

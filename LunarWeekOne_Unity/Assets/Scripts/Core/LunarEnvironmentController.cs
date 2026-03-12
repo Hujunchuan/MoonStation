@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -14,23 +15,19 @@ namespace Lunar.Core
         [SerializeField] private float dayLightIntensity = 0.8f;
         [SerializeField] private float nightLightIntensity = 0.2f;
 
-        [Header("Fog")]
-        [SerializeField] private float baseFogDensity = 0.01f;
-        [SerializeField] private float anomalyFogDensity = 0.05f;
-
         [Header("Post Processing")]
         [SerializeField] private Volume postProcessVolume;
         [SerializeField] private float colorTempDay = 6500f;
         [SerializeField] private float colorTempNight = 3200f;
 
-        [Header("Visual Effects")]
+        [Header("Effects")]
         [SerializeField] private ParticleSystem dustParticles;
         [SerializeField] private ParticleSystem anomalyParticles;
         [SerializeField] private Material skyboxMaterial;
         [SerializeField] private Texture2D daySkybox;
         [SerializeField] private Texture2D nightSkybox;
 
-        [Header("Environment States")]
+        [Header("State")]
         [SerializeField] private EnvironmentState currentState = EnvironmentState.Normal;
         [SerializeField] private LunarDay currentDay = LunarDay.Day1_Arrival;
 
@@ -38,8 +35,7 @@ namespace Lunar.Core
         private Bloom bloom;
         private Vignette vignette;
         private FilmGrain filmGrain;
-
-        private Coroutine environmentTransitionCoroutine;
+        private Coroutine transitionCoroutine;
 
         public event Action<EnvironmentState> OnEnvironmentStateChanged;
 
@@ -54,78 +50,20 @@ namespace Lunar.Core
         private void Start()
         {
             InitializePostProcessing();
-            InitializeLighting();
-            InitializeEffects();
-
-            SetEnvironmentState(currentState);
+            ApplyStateImmediate(currentState);
         }
 
         private void InitializePostProcessing()
         {
-            if (postProcessVolume != null)
+            if (postProcessVolume == null || postProcessVolume.profile == null)
             {
-                if (postProcessVolume.profile.TryGet(out colorAdjustments))
-                {
-                    colorAdjustments.colorFilter.value = Color.white;
-                    colorAdjustments.postExposure.value = 0f;
-                }
-
-                if (postProcessVolume.profile.TryGet(out bloom))
-                {
-                    bloom.intensity.value = 0.5f;
-                    bloom.threshold.value = 0.8f;
-                }
-
-                if (postProcessVolume.profile.TryGet(out vignette))
-                {
-                    vignette.intensity.value = 0.3f;
-                    vignette.smoothness.value = 0.2f;
-                }
-
-                if (postProcessVolume.profile.TryGet(out filmGrain))
-                {
-                    filmGrain.intensity.value = 0.1f;
-                    filmGrain.type.value = FilmGrainLookup.Thin2;
-                }
-            }
-        }
-
-        private void InitializeLighting()
-        {
-            if (mainDirectionalLight != null)
-            {
-                mainDirectionalLight.intensity = dayLightIntensity;
-                mainDirectionalLight.colorTemperature = colorTempDay;
+                return;
             }
 
-            if (interiorLights != null)
-            {
-                foreach (var light in interiorLights)
-                {
-                    if (light != null)
-                    {
-                        light.intensity = 1f;
-                    }
-                }
-            }
-        }
-
-        private void InitializeEffects()
-        {
-            if (dustParticles != null)
-            {
-                dustParticles.Stop();
-            }
-
-            if (anomalyParticles != null)
-            {
-                anomalyParticles.Stop();
-            }
-
-            if (skyboxMaterial != null && daySkybox != null)
-            {
-                skyboxMaterial.SetTexture("_MainTex", daySkybox);
-            }
+            postProcessVolume.profile.TryGet(out colorAdjustments);
+            postProcessVolume.profile.TryGet(out bloom);
+            postProcessVolume.profile.TryGet(out vignette);
+            postProcessVolume.profile.TryGet(out filmGrain);
         }
 
         public void SetDay(LunarDay day)
@@ -134,11 +72,6 @@ namespace Lunar.Core
 
             switch (day)
             {
-                case LunarDay.Day1_Arrival:
-                    SetEnvironmentState(EnvironmentState.Transition);
-                    StartCoroutine(TransitionToDay(1));
-                    break;
-
                 case LunarDay.Day4_Uncertainty:
                     SetEnvironmentState(EnvironmentState.Anomaly);
                     break;
@@ -152,9 +85,14 @@ namespace Lunar.Core
                     {
                         skyboxMaterial.SetTexture("_MainTex", nightSkybox);
                     }
+                    SetEnvironmentState(EnvironmentState.Normal);
                     break;
 
                 default:
+                    if (skyboxMaterial != null && daySkybox != null)
+                    {
+                        skyboxMaterial.SetTexture("_MainTex", daySkybox);
+                    }
                     SetEnvironmentState(EnvironmentState.Normal);
                     break;
             }
@@ -162,176 +100,214 @@ namespace Lunar.Core
 
         public void SetEnvironmentState(EnvironmentState state)
         {
-            if (currentState == state) return;
+            if (currentState == state && transitionCoroutine == null)
+            {
+                ApplyStateImmediate(state);
+                return;
+            }
 
             currentState = state;
             OnEnvironmentStateChanged?.Invoke(state);
 
-            StopEnvironmentTransition();
-            environmentTransitionCoroutine = StartCoroutine(TransitionToState(state));
+            if (transitionCoroutine != null)
+            {
+                StopCoroutine(transitionCoroutine);
+            }
+
+            transitionCoroutine = StartCoroutine(TransitionToState(state));
         }
 
-        private IEnumerator TransitionToState(EnvironmentState state)
+        private IEnumerator TransitionToState(EnvironmentState targetState)
         {
-            float transitionDuration = 2f;
             float elapsed = 0f;
+            const float duration = 1.5f;
 
-            EnvironmentState startState = currentState;
-
-            while (elapsed < transitionDuration)
+            while (elapsed < duration)
             {
                 elapsed += Time.deltaTime;
-                float t = elapsed / transitionDuration;
-
-                switch (state)
-                {
-                    case EnvironmentState.Normal:
-                        ApplyNormalState(t);
-                        break;
-
-                    case EnvironmentState.Anomaly:
-                        ApplyAnomalyState(t);
-                        break;
-
-                    case EnvironmentState.Ritual:
-                        ApplyRitualState(t);
-                        break;
-
-                    case EnvironmentState.Transition:
-                        ApplyTransitionState(t);
-                        break;
-                }
-
+                float t = Mathf.Clamp01(elapsed / duration);
+                ApplyState(targetState, t);
                 yield return null;
             }
 
-            environmentTransitionCoroutine = null;
+            ApplyStateImmediate(targetState);
+            transitionCoroutine = null;
         }
 
-        private IEnumerator TransitionToDay(int day)
+        private void ApplyState(EnvironmentState state, float t)
         {
-            yield return new WaitForSeconds(1f);
-            SetEnvironmentState(EnvironmentState.Normal);
+            switch (state)
+            {
+                case EnvironmentState.Normal:
+                    ApplyLighting(Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.intensity : dayLightIntensity, dayLightIntensity, t),
+                        Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.colorTemperature : colorTempDay, colorTempDay, t));
+                    ApplyPostExposure(Mathf.Lerp(GetPostExposure(), 0f, t));
+                    ApplyBloom(Mathf.Lerp(GetBloomIntensity(), 0.45f, t));
+                    ApplyFilmGrain(Mathf.Lerp(GetFilmGrainIntensity(), 0.08f, t));
+                    ToggleParticles(dustParticles, true);
+                    ToggleParticles(anomalyParticles, false);
+                    break;
+
+                case EnvironmentState.Anomaly:
+                    ApplyLighting(Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.intensity : dayLightIntensity, dayLightIntensity * 0.55f, t),
+                        Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.colorTemperature : colorTempDay, 8000f, t));
+                    ApplyPostExposure(Mathf.Lerp(GetPostExposure(), 0.35f, t));
+                    ApplyBloom(Mathf.Lerp(GetBloomIntensity(), 1.3f, t));
+                    ApplyFilmGrain(Mathf.Lerp(GetFilmGrainIntensity(), 0.3f, t));
+                    ToggleParticles(dustParticles, false);
+                    ToggleParticles(anomalyParticles, true);
+                    break;
+
+                case EnvironmentState.Ritual:
+                    ApplyLighting(Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.intensity : dayLightIntensity, nightLightIntensity, t),
+                        Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.colorTemperature : colorTempDay, colorTempNight, t));
+                    ApplyPostExposure(Mathf.Lerp(GetPostExposure(), -0.3f, t));
+                    ApplyBloom(Mathf.Lerp(GetBloomIntensity(), 0.8f, t));
+                    ApplyFilmGrain(Mathf.Lerp(GetFilmGrainIntensity(), 0.05f, t));
+                    ToggleParticles(dustParticles, false);
+                    ToggleParticles(anomalyParticles, false);
+                    break;
+
+                case EnvironmentState.Transition:
+                    ApplyLighting(Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.intensity : dayLightIntensity, nightLightIntensity, t),
+                        Mathf.Lerp(mainDirectionalLight != null ? mainDirectionalLight.colorTemperature : colorTempDay, colorTempNight, t));
+                    ApplyPostExposure(Mathf.Lerp(GetPostExposure(), -1f, t));
+                    break;
+            }
         }
 
-        private void ApplyNormalState(float t)
+        private void ApplyStateImmediate(EnvironmentState state)
+        {
+            currentState = state;
+
+            switch (state)
+            {
+                case EnvironmentState.Normal:
+                    ApplyLighting(dayLightIntensity, colorTempDay);
+                    ApplyPostExposure(0f);
+                    ApplyBloom(0.45f);
+                    ApplyFilmGrain(0.08f);
+                    SetInteriorLightIntensity(1f);
+                    SetRitualLightIntensity(0.1f);
+                    ToggleParticles(dustParticles, true);
+                    ToggleParticles(anomalyParticles, false);
+                    break;
+
+                case EnvironmentState.Anomaly:
+                    ApplyLighting(dayLightIntensity * 0.55f, 8000f);
+                    ApplyPostExposure(0.35f);
+                    ApplyBloom(1.3f);
+                    ApplyFilmGrain(0.3f);
+                    SetInteriorLightIntensity(0.7f);
+                    SetRitualLightIntensity(0.15f);
+                    ToggleParticles(dustParticles, false);
+                    ToggleParticles(anomalyParticles, true);
+                    break;
+
+                case EnvironmentState.Ritual:
+                    ApplyLighting(nightLightIntensity, colorTempNight);
+                    ApplyPostExposure(-0.3f);
+                    ApplyBloom(0.8f);
+                    ApplyFilmGrain(0.05f);
+                    SetInteriorLightIntensity(0.3f);
+                    SetRitualLightIntensity(0.5f);
+                    ToggleParticles(dustParticles, false);
+                    ToggleParticles(anomalyParticles, false);
+                    break;
+
+                case EnvironmentState.Transition:
+                    ApplyLighting(nightLightIntensity, colorTempNight);
+                    ApplyPostExposure(-1f);
+                    break;
+            }
+        }
+
+        private void ApplyLighting(float intensity, float colorTemperature)
         {
             if (mainDirectionalLight != null)
             {
-                mainDirectionalLight.intensity = Mathf.Lerp(mainDirectionalLight.intensity, dayLightIntensity, t);
-                mainDirectionalLight.colorTemperature = Mathf.Lerp(mainDirectionalLight.colorTemperature, colorTempDay, t);
-            }
-
-            if (colorAdjustments != null)
-            {
-                colorAdjustments.postExposure.value = Mathf.Lerp(colorAdjustments.postExposure.value, 0f, t);
-                colorAdjustments.colorFilter.value = Color.Lerp(colorAdjustments.colorFilter.value, Color.white, t);
-            }
-
-            if (bloom != null)
-            {
-                bloom.intensity.value = Mathf.Lerp(bloom.intensity.value, 0.5f, t);
-            }
-
-            if (dustParticles != null && dustParticles.isStopped)
-            {
-                dustParticles.Play();
-            }
-
-            if (anomalyParticles != null && anomalyParticles.isPlaying)
-            {
-                anomalyParticles.Stop();
+                mainDirectionalLight.intensity = intensity;
+                mainDirectionalLight.colorTemperature = colorTemperature;
             }
         }
 
-        private void ApplyAnomalyState(float t)
+        private void SetInteriorLightIntensity(float intensity)
         {
-            if (mainDirectionalLight != null)
+            if (interiorLights == null)
             {
-                mainDirectionalLight.intensity = Mathf.Lerp(mainDirectionalLight.intensity, dayLightIntensity * 0.5f, t);
-                mainDirectionalLight.colorTemperature = Mathf.Lerp(mainDirectionalLight.colorTemperature, 8000f, t);
+                return;
             }
 
-            if (colorAdjustments != null)
+            foreach (Light light in interiorLights)
             {
-                colorAdjustments.postExposure.value = Mathf.Lerp(colorAdjustments.postExposure.value, 0.5f, t);
-                Color anomalyColor = new Color(0.9f, 0.7f, 0.8f);
-                colorAdjustments.colorFilter.value = Color.Lerp(colorAdjustments.colorFilter.value, anomalyColor, t);
-            }
-
-            if (bloom != null)
-            {
-                bloom.intensity.value = Mathf.Lerp(bloom.intensity.value, 1.5f, t);
-            }
-
-            if (filmGrain != null)
-            {
-                filmGrain.intensity.value = Mathf.Lerp(filmGrain.intensity.value, 0.3f, t);
-            }
-
-            if (dustParticles != null && dustParticles.isPlaying)
-            {
-                dustParticles.Stop();
-            }
-
-            if (anomalyParticles != null && anomalyParticles.isStopped)
-            {
-                anomalyParticles.Play();
-            }
-        }
-
-        private void ApplyRitualState(float t)
-        {
-            if (mainDirectionalLight != null)
-            {
-                mainDirectionalLight.intensity = Mathf.Lerp(mainDirectionalLight.intensity, nightLightIntensity, t);
-                mainDirectionalLight.colorTemperature = Mathf.Lerp(mainDirectionalLight.colorTemperature, colorTempNight, t);
-            }
-
-            if (ritualAmbientLight != null)
-            {
-                ritualAmbientLight.intensity = Mathf.Lerp(ritualAmbientLight.intensity, 0.5f, t);
-            }
-
-            if (colorAdjustments != null)
-            {
-                colorAdjustments.postExposure.value = Mathf.Lerp(colorAdjustments.postExposure.value, -0.3f, t);
-                Color ritualColor = new Color(0.7f, 0.8f, 1f);
-                colorAdjustments.colorFilter.value = Color.Lerp(colorAdjustments.colorFilter.value, ritualColor, t);
-            }
-
-            if (vignette != null)
-            {
-                vignette.intensity.value = Mathf.Lerp(vignette.intensity.value, 0.5f, t);
-            }
-
-            if (interiorLights != null)
-            {
-                foreach (var light in interiorLights)
+                if (light != null)
                 {
-                    if (light != null)
-                    {
-                        light.intensity = Mathf.Lerp(light.intensity, 0.3f, t);
-                    }
+                    light.intensity = intensity;
                 }
             }
+        }
 
-            if (dustParticles != null && dustParticles.isPlaying)
+        private void SetRitualLightIntensity(float intensity)
+        {
+            if (ritualAmbientLight != null)
             {
-                dustParticles.Stop();
+                ritualAmbientLight.intensity = intensity;
             }
         }
 
-        private void ApplyTransitionState(float t)
+        private void ApplyPostExposure(float value)
         {
-            if (mainDirectionalLight != null)
-            {
-                mainDirectionalLight.intensity = Mathf.Lerp(mainDirectionalLight.intensity, nightLightIntensity, t);
-            }
-
             if (colorAdjustments != null)
             {
-                colorAdjustments.postExposure.value = Mathf.Lerp(colorAdjustments.postExposure.value, -1f, t);
+                colorAdjustments.postExposure.value = value;
+            }
+        }
+
+        private void ApplyBloom(float value)
+        {
+            if (bloom != null)
+            {
+                bloom.intensity.value = value;
+            }
+        }
+
+        private void ApplyFilmGrain(float value)
+        {
+            if (filmGrain != null)
+            {
+                filmGrain.intensity.value = value;
+            }
+        }
+
+        private float GetPostExposure()
+        {
+            return colorAdjustments != null ? colorAdjustments.postExposure.value : 0f;
+        }
+
+        private float GetBloomIntensity()
+        {
+            return bloom != null ? bloom.intensity.value : 0f;
+        }
+
+        private float GetFilmGrainIntensity()
+        {
+            return filmGrain != null ? filmGrain.intensity.value : 0f;
+        }
+
+        private void ToggleParticles(ParticleSystem system, bool shouldPlay)
+        {
+            if (system == null)
+            {
+                return;
+            }
+
+            if (shouldPlay && system.isStopped)
+            {
+                system.Play();
+            }
+            else if (!shouldPlay && system.isPlaying)
+            {
+                system.Stop();
             }
         }
 
@@ -347,40 +323,13 @@ namespace Lunar.Core
             while (elapsed < duration)
             {
                 elapsed += Time.deltaTime;
-                float t = elapsed / duration;
-                float pulseIntensity = intensity * Mathf.Sin(elapsed * 10f);
-
-                if (colorAdjustments != null)
-                {
-                    colorAdjustments.postExposure.value = pulseIntensity;
-                }
-
-                if (bloom != null)
-                {
-                    bloom.intensity.value = 0.5f + pulseIntensity * 2f;
-                }
-
+                float pulse = intensity * Mathf.Sin(elapsed * 10f);
+                ApplyPostExposure(pulse);
+                ApplyBloom(0.5f + pulse * 1.5f);
                 yield return null;
             }
 
-            if (colorAdjustments != null)
-            {
-                colorAdjustments.postExposure.value = 0f;
-            }
-
-            if (bloom != null)
-            {
-                bloom.intensity.value = 0.5f;
-            }
-        }
-
-        private void StopEnvironmentTransition()
-        {
-            if (environmentTransitionCoroutine != null)
-            {
-                StopCoroutine(environmentTransitionCoroutine);
-                environmentTransitionCoroutine = null;
-            }
+            ApplyStateImmediate(currentState);
         }
 
         public EnvironmentState GetCurrentState()
@@ -391,17 +340,6 @@ namespace Lunar.Core
         public LunarDay GetCurrentDay()
         {
             return currentDay;
-        }
-
-        public void ResetEnvironment()
-        {
-            StopEnvironmentTransition();
-            currentState = EnvironmentState.Normal;
-            currentDay = LunarDay.Day1_Arrival;
-
-            InitializePostProcessing();
-            InitializeLighting();
-            InitializeEffects();
         }
     }
 }

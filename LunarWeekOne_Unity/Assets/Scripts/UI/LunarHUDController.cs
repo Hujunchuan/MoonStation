@@ -103,6 +103,21 @@ namespace Lunar.Core
                 masterVolumeSlider.onValueChanged.AddListener(OnMasterVolumeChanged);
             }
 
+            if (audioEngine != null && ambientVolumeSlider != null)
+            {
+                ambientVolumeSlider.onValueChanged.AddListener(OnAmbientVolumeChanged);
+            }
+
+            if (audioEngine != null && breathVolumeSlider != null)
+            {
+                breathVolumeSlider.onValueChanged.AddListener(OnBreathVolumeChanged);
+            }
+
+            if (audioEngine != null && voiceVolumeSlider != null)
+            {
+                voiceVolumeSlider.onValueChanged.AddListener(OnVoiceVolumeChanged);
+            }
+
             if (breathGuideToggle != null)
             {
                 breathGuideToggle.onValueChanged.AddListener(OnBreathGuideToggled);
@@ -121,6 +136,21 @@ namespace Lunar.Core
             if (masterVolumeSlider != null && audioEngine != null)
             {
                 masterVolumeSlider.value = 0.8f;
+            }
+
+            if (ambientVolumeSlider != null)
+            {
+                ambientVolumeSlider.value = 0.6f;
+            }
+
+            if (breathVolumeSlider != null)
+            {
+                breathVolumeSlider.value = 0.45f;
+            }
+
+            if (voiceVolumeSlider != null)
+            {
+                voiceVolumeSlider.value = 0.7f;
             }
 
             ShowStatus("Welcome to Lunar Week One", Color.cyan);
@@ -182,7 +212,9 @@ namespace Lunar.Core
 
             if (dayProgressSlider != null)
             {
-                float progress = Mathf.Clamp01(stateMachine.CurrentDayElapsed / stateMachine.CurrentDayTargetDuration);
+                float progress = stateMachine.CurrentDayTargetDuration > 0f
+                    ? Mathf.Clamp01(stateMachine.CurrentDayElapsed / stateMachine.CurrentDayTargetDuration)
+                    : 0f;
                 dayProgressSlider.value = progress;
             }
 
@@ -387,6 +419,30 @@ namespace Lunar.Core
             if (audioEngine != null)
             {
                 audioEngine.SetBreathGuideActive(enabled);
+            }
+        }
+
+        private void OnAmbientVolumeChanged(float volume)
+        {
+            if (audioEngine != null)
+            {
+                audioEngine.SetAmbientVolume(volume);
+            }
+        }
+
+        private void OnBreathVolumeChanged(float volume)
+        {
+            if (audioEngine != null)
+            {
+                audioEngine.SetBreathVolume(volume);
+            }
+        }
+
+        private void OnVoiceVolumeChanged(float volume)
+        {
+            if (audioEngine != null)
+            {
+                audioEngine.SetVoiceVolume(volume);
             }
         }
 

@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Generic;
+using Lunar.Data;
 using UnityEngine;
 
 namespace Lunar.Core
@@ -9,6 +11,7 @@ namespace Lunar.Core
 
         [Header("System References")]
         [SerializeField] private LunarDayStateMachine stateMachine;
+        [SerializeField] private LunarEnvironmentController environmentController;
         [SerializeField] private AudioTherapyEngine audioEngine;
         [SerializeField] private ResourceManager resourceManager;
         [SerializeField] private RitualEngine ritualEngine;
@@ -18,27 +21,31 @@ namespace Lunar.Core
         [Header("Configuration")]
         [SerializeField] private bool autoInitialize = true;
         [SerializeField] private bool loadSavedProgress = true;
+        [SerializeField] private bool enableDebugShortcuts;
         [SerializeField] private float experienceTimeoutSeconds = 1800f;
 
-        private Dictionary<LunarDay, LunarDayConfig> dayConfigs;
+        private Dictionary<LunarDay, LunarDayConfig> dayConfigs = new Dictionary<LunarDay, LunarDayConfig>();
+        private bool callbacksRegistered;
+        private bool hasStarted;
         private bool isExperienceActive;
         private float experienceStartTime;
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
+
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
         }
 
         private void Start()
         {
+            hasStarted = true;
+
             if (autoInitialize)
             {
                 InitializeExperience();
@@ -47,9 +54,24 @@ namespace Lunar.Core
 
         public void InitializeExperience()
         {
-            LoadDayConfigurations();
+            if (isExperienceActive)
+            {
+                return;
+            }
 
-            if (loadSavedProgress)
+            ResolveDependencies();
+            if (!ValidateDependencies())
+            {
+                return;
+            }
+
+            dayConfigs = LunarDefaultConfigFactory.CreateDayConfigs();
+
+            if (sessionManager.HasActiveSession())
+            {
+                sessionManager.ResumeActiveSession();
+            }
+            else if (loadSavedProgress && sessionManager.HasSavedProgress())
             {
                 sessionManager.LoadProgress();
             }
@@ -58,206 +80,140 @@ namespace Lunar.Core
                 sessionManager.InitializeNewSession();
             }
 
-            SetupSystemCallbacks();
+            RegisterCallbacks();
 
             experienceStartTime = Time.time;
             isExperienceActive = true;
 
-            stateMachine.Initialize(dayConfigs);
+            LunarDay startDay = sessionManager.GetCurrentDayEnum();
+            stateMachine.Initialize(dayConfigs, startDay);
+
+            if (dayConfigs.TryGetValue(startDay, out var config))
+            {
+                resourceManager.ApplyDayConfig(config);
+            }
+
+            var session = sessionManager.GetCurrentSession();
+            resourceManager.RestoreResourceLevels(
+                session.energyLevel,
+                session.oxygenLevel,
+                session.waterLevel);
+
+            sessionManager.UpdateResourceLevels(
+                resourceManager.GetResource(ResourceType.Energy),
+                resourceManager.GetResource(ResourceType.Oxygen),
+                resourceManager.GetResource(ResourceType.Water));
+
             audioEngine.StartAmbientLayer();
+            environmentController?.SetDay(startDay);
 
             StartCoroutine(ExperienceTimeoutCheck());
         }
 
-        private void LoadDayConfigurations()
+        private void ResolveDependencies()
         {
-            dayConfigs = new Dictionary<LunarDay, LunarDayConfig>();
-
-            for (int i = 1; i <= LunarConstants.TOTAL_LUNAR_DAYS; i++)
+            if (stateMachine == null)
             {
-                var day = (LunarDay)i;
-                dayConfigs[day] = CreateDayConfig(day);
+                stateMachine = LunarDayStateMachine.Instance;
+            }
+
+            if (audioEngine == null)
+            {
+                audioEngine = AudioTherapyEngine.Instance;
+            }
+
+            if (resourceManager == null)
+            {
+                resourceManager = ResourceManager.Instance;
+            }
+
+            if (ritualEngine == null)
+            {
+                ritualEngine = RitualEngine.Instance;
+            }
+
+            if (sessionManager == null)
+            {
+                sessionManager = UserSessionManager.Instance;
+            }
+
+            if (feedbackCollector == null)
+            {
+                feedbackCollector = ExperienceFeedbackCollector.Instance;
             }
         }
 
-        private LunarDayConfig CreateDayConfig(LunarDay day)
+        private bool ValidateDependencies()
         {
-            var config = new LunarDayConfig
+            bool isValid = true;
+            isValid &= ValidateReference(stateMachine, nameof(stateMachine));
+            isValid &= ValidateReference(audioEngine, nameof(audioEngine));
+            isValid &= ValidateReference(resourceManager, nameof(resourceManager));
+            isValid &= ValidateReference(ritualEngine, nameof(ritualEngine));
+            isValid &= ValidateReference(sessionManager, nameof(sessionManager));
+            isValid &= ValidateReference(feedbackCollector, nameof(feedbackCollector));
+            return isValid;
+        }
+
+        private bool ValidateReference(Object reference, string fieldName)
+        {
+            if (reference != null)
             {
-                dayNumber = (int)day,
-                dayName = $"Day {(int)day}: {GetDayName(day)}",
-                theme = GetDayTheme(day),
-                targetDurationMinutes = GetDayDuration(day),
-                hasAnomaly = ShouldHaveAnomaly(day),
-                anomalyChance = GetAnomalyChance(day)
-            };
-
-            config.narrativeClips.AddRange(GetNarrativeClipsForDay(day));
-            config.documentaryClips.AddRange(GetDocumentaryClipsForDay(day));
-            config.ritual = CreateRitualConfigForDay(day);
-
-            return config;
-        }
-
-        private string GetDayName(LunarDay day)
-        {
-            switch (day)
-            {
-                case LunarDay.Day1_Arrival: return "Arrival";
-                case LunarDay.Day2_Adaptation: return "Adaptation";
-                case LunarDay.Day3_Order: return "Order";
-                case LunarDay.Day4_Uncertainty: return "Uncertainty";
-                case LunarDay.Day5_Ritual: return "Deep Ritual";
-                case LunarDay.Day6_Stability: return "Stability";
-                case LunarDay.Day7_Reflection: return "Reflection";
-                default: return "Unknown";
-            }
-        }
-
-        private string GetDayTheme(LunarDay day)
-        {
-            switch (day)
-            {
-                case LunarDay.Day1_Arrival: return "混乱、警报";
-                case LunarDay.Day2_Adaptation: return "适应、熟悉";
-                case LunarDay.Day3_Order: return "任务执行、建立规律";
-                case LunarDay.Day4_Uncertainty: return "模拟系统故障、视觉干扰";
-                case LunarDay.Day5_Ritual: return "核心冥想体验";
-                case LunarDay.Day6_Stability: return "自动化运行、平静";
-                case LunarDay.Day7_Reflection: return "地球升起、总结";
-                default: return "主题";
-            }
-        }
-
-        private float GetDayDuration(LunarDay day)
-        {
-            return 4f;
-        }
-
-        private bool ShouldHaveAnomaly(LunarDay day)
-        {
-            return day == LunarDay.Day4_Uncertainty;
-        }
-
-        private float GetAnomalyChance(LunarDay day)
-        {
-            return day == LunarDay.Day4_Uncertainty ? kindly0.5f : 0f;
-        }
-
-        private List<string> GetNarrativeClipsForDay(LunarDay day)
-        {
-            var clips = new List<string>();
-            switch (day)
-            {
-                case LunarDay.Day1_Arrival:
-                    clips.Add("Narrative_Day1_Arrival");
-                    break;
-                case LunarDay.Day2_Adaptation:
-                    clips.Add("Narrative_Day2_Adaptation");
-                    break;
-                case LunarDay.Day3_Order:
-                    clips.Add("Narrative_Day3_Order");
-                    break;
-                case LunarDay.Day4_Uncertainty:
-                    clips.Add("Narrative_Day4_Uncertainty");
-                    break;
-                case LunarDay.Day5_Ritual:
-                    clips.Add("Narrative_Day5_Ritual");
-                    break;
-                case LunarDay.Day6_Stability:
-                    clips.Add("Narrative_Day6_Stability");
-                    break;
-                case LunarDay.Day7_Reflection:
-                    clips.Add("Narrative_Day7_Reflection");
-                    break;
-            }
-            return clips;
-        }
-
-        private List<string> GetDocumentaryClipsForDay(LunarDay day)
-        {
-            var clips = new List<string>();
-            if (day == LunarDay.Day3_Order || day == LunarDay.Day4_Uncertainty)
-            {
-                clips.Add("Documentary_Apollo");
-            }
-            return clips;
-        }
-
-        private RitualConfig CreateRitualConfigForDay(LunarDay day)
-        {
-            var config = new RitualConfig
-            {
-                targetDay = day,
-                ritualName = $"Day {(int)day} Ritual",
-                description = GetRitualDescription(day),
-                isDeepRitual = (day == LunarDay.Day5_Ritual)
-            };
-
-            config.phases.AddRange(GetRitualPhasesForDay(day));
-            return config;
-        }
-
-        private string GetRitualDescription(LunarDay day)
-        {
-            switch (day)
-            {
-                case LunarDay.Day1_Arrival: return "降落仪式 - 落地/安顿";
-                case LunarDay.Day2_Adaptation: return "空间仪式 - 熟悉空间";
-                case LunarDay.Day3_Order: return "任务仪式 - 建立节奏";
-                case LunarDay.Day4_Uncertainty: return "波动仪式 - 接受不确定";
-                case LunarDay.Day5_Ritual: return "深度仪式 - 内在探索";
-                case LunarDay.Day6_Stability: return "稳固仪式 - 强化习惯";
-                case LunarDay.Day7_Reflection: return "回望仪式 - 文明视角";
-                default: return "仪式";
-            }
-        }
-
-        private List<RitualPhaseConfig> GetRitualPhasesForDay(LunarDay day)
-        {
-            var phases = new List<RitualPhaseConfig>();
-
-            switch (day)
-            {
-                case LunarDay.Day5_Ritual:
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Enter, durationSeconds = 30f });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Anchor, durationSeconds = 90f });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Order, durationSeconds = 60f, requiresInteraction = true });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Observe, durationSeconds = 120f });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Exit, durationSeconds = 30f });
-                    break;
-
-                default:
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Enter, durationSeconds = 15f });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Anchor, durationSeconds = 45f });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Observe, durationSeconds =绝大多数 60f });
-                    phases.Add(new RitualPhaseConfig { phase = RitualPhase.Exit, durationSeconds = 15f });
-                    break;
+                return true;
             }
 
-            return phases;
+            Debug.LogError($"[LunarExperienceController] Missing required reference: {fieldName}");
+            return false;
         }
 
-        private void SetupSystemCallbacks()
+        private void RegisterCallbacks()
         {
+            if (callbacksRegistered)
+            {
+                UnregisterCallbacks();
+            }
+
+            resourceManager.OnResourceChanged += HandleResourceChanged;
+            resourceManager.OnAnomalyStarted += HandleAnomalyStarted;
+            resourceManager.OnAnomalyResolved += HandleAnomalyResolved;
+
+            stateMachine.OnDayChanged += HandleDayChanged;
+            stateMachine.OnDayCompleted += HandleDayCompleted;
+            stateMachine.OnStateChanged += HandleStateChanged;
+            stateMachine.OnExperienceCompleted += HandleExperienceCompleted;
+
+            ritualEngine.OnRitualCompleted += HandleRitualCompleted;
+            callbacksRegistered = true;
+        }
+
+        private void UnregisterCallbacks()
+        {
+            if (!callbacksRegistered)
+            {
+                return;
+            }
+
             if (resourceManager != null)
             {
-                resourceManager.OnResourceChanged += HandleResourceChanged;
-                resourceManager.OnAnomalyStarted += HandleAnomalyStarted;
-                resourceManager.OnAnomalyResolved += HandleAnomalyResolved;
+                resourceManager.OnResourceChanged -= HandleResourceChanged;
+                resourceManager.OnAnomalyStarted -= HandleAnomalyStarted;
+                resourceManager.OnAnomalyResolved -= HandleAnomalyResolved;
             }
 
             if (stateMachine != null)
             {
-                stateMachine.OnDayChanged += HandleDayChanged;
-                stateMachine.OnDayCompleted += HandleDayCompleted;
-                stateMachine.OnStateChanged += HandleStateChanged;
+                stateMachine.OnDayChanged -= HandleDayChanged;
+                stateMachine.OnDayCompleted -= HandleDayCompleted;
+                stateMachine.OnStateChanged -= HandleStateChanged;
+                stateMachine.OnExperienceCompleted -= HandleExperienceCompleted;
             }
 
             if (ritualEngine != null)
             {
-                ritualEngine.OnRitualCompleted += HandleRitualCompleted;
+                ritualEngine.OnRitualCompleted -= HandleRitualCompleted;
             }
+
+            callbacksRegistered = false;
         }
 
         private void HandleResourceChanged(ResourceType type, float value)
@@ -265,45 +221,51 @@ namespace Lunar.Core
             sessionManager.UpdateResourceLevels(
                 resourceManager.GetResource(ResourceType.Energy),
                 resourceManager.GetResource(ResourceType.Oxygen),
-                resourceManager.GetResource(ResourceType.Water)
-            );
-
-            sessionManager.RecordInteraction();
+                resourceManager.GetResource(ResourceType.Water));
         }
 
         private void HandleAnomalyStarted()
         {
             audioEngine.SetAmbientFrequency(85f);
+            environmentController?.SetEnvironmentState(LunarEnvironmentController.EnvironmentState.Anomaly);
         }
 
         private void HandleAnomalyResolved()
         {
             audioEngine.SetAmbientFrequency(60f);
+            environmentController?.SetDay(stateMachine.CurrentDay);
         }
 
         private void HandleDayChanged(LunarDay day)
         {
-            Debug.Log($"[ExperienceController] Day changed to {day}");
-            audioEngine.PlayIntroductionAudio(day);
+            sessionManager.SetCurrentDay(day);
+
+            if (dayConfigs.TryGetValue(day, out var config))
+            {
+                resourceManager.ApplyDayConfig(config);
+            }
+
+            environmentController?.SetDay(day);
         }
 
-        private void HandleDayCompleted()
+        private void HandleDayCompleted(LunarDay day)
         {
-            int currentDay = sessionManager.GetCurrentDay();
-            sessionManager.CompleteDay(currentDay);
+            sessionManager.CompleteDay((int)day);
         }
 
         private void HandleStateChanged(LunarDayState state)
         {
-            Debug.Log($"[ExperienceController] State changed to {state}");
-
             switch (state)
             {
                 case LunarDayState.ResourceManagement:
                     resourceManager.EnableManagement();
                     break;
 
+                case LunarDayState.Ritual:
+                case LunarDayState.Introduction:
+                case LunarDayState.Narration:
                 case LunarDayState.Completion:
+                case LunarDayState.Transition:
                     resourceManager.DisableManagement();
                     break;
             }
@@ -311,64 +273,58 @@ namespace Lunar.Core
 
         private void HandleRitualCompleted(RitualCompletionResult result)
         {
-            Debug.Log($"[ExperienceController] Ritual completed on {result.day}, Interaction count: {result.interactionCount}");
-
-            if (result.day == LunarDay.Day5_Ritual && result.completed)
+            if (result.completed)
             {
-                Debug.Log("[ExperienceController] ✓ Deep ritual completed successfully");
+                Debug.Log($"[LunarExperienceController] Ritual completed for {result.day}");
             }
         }
 
-        private System.Collections.IEnumerator ExperienceTimeoutCheck()
+        private void HandleExperienceCompleted()
+        {
+            EndExperience();
+        }
+
+        private IEnumerator ExperienceTimeoutCheck()
         {
             while (isExperienceActive)
             {
                 if (Time.time - experienceStartTime >= experienceTimeoutSeconds)
                 {
                     EndExperience(true);
-                    break;
+                    yield break;
                 }
-                yield return new WaitForSeconds(5f);
+
+                yield return new WaitForSeconds(2f);
             }
         }
 
         public void EndExperience(bool timeout = false)
         {
-            if (!isExperienceActive) return;
-
-            isExperienceActive = false;
-
-            if (timeout)
+            if (!isExperienceActive)
             {
-                Debug.LogWarning("[ExperienceController] Experience timeout reached");
+                return;
             }
 
-            stateMachine.ExitExperience();
-            audioEngine.StopAllAudio();
-
-            feedbackCollector.CollectFinalFeedback();
+            ShutdownExperience(timeout, true);
         }
 
-        private void Update()
+        public void SuspendExperienceForMenu()
         {
-            if (Input.GetKeyDown(KeyCode.Escape))
+            if (!isExperienceActive)
             {
-                EndExperience();
+                return;
             }
 
-            if (Input.GetKeyDown(KeyCode.Space))
-            {
-                resourceManager.PerformResourceAction(ResourceType.Energy);
-            }
+            ShutdownExperience(false, false);
+        }
 
-            if (Input.GetKeyDown(KeyCode.R) && ritualEngine.IsRitualActive())
-            {
-                ritualEngine.PerformValveInteraction();
-            }
+        public void ConfigureAutoInitialize(bool enabled, bool initializeNow = false)
+        {
+            autoInitialize = enabled;
 
-            if (Input.GetKeyDown(KeyCode.N))
+            if (initializeNow && autoInitialize && hasStarted && !isExperienceActive)
             {
-                stateMachine.SkipToNextState();
+                InitializeExperience();
             }
         }
 
@@ -379,55 +335,75 @@ namespace Lunar.Core
 
         public float GetExperienceProgress()
         {
+            if (!isExperienceActive || experienceTimeoutSeconds <= 0f)
+            {
+                return 0f;
+            }
+
             return Mathf.Clamp01((Time.time - experienceStartTime) / experienceTimeoutSeconds);
         }
 
         public float GetElapsedTime()
         {
-            return Time.time - experienceStartTime;
+            return isExperienceActive ? Time.time - experienceStartTime : 0f;
+        }
+
+        private void ShutdownExperience(bool timeout, bool collectFeedback)
+        {
+            isExperienceActive = false;
+
+            if (timeout)
+            {
+                Debug.LogWarning("[LunarExperienceController] Experience timed out");
+            }
+
+            stateMachine.ExitExperience();
+            resourceManager.DisableManagement();
+            audioEngine.StopAllAudio();
+            sessionManager.SaveProgress();
+
+            if (collectFeedback)
+            {
+                feedbackCollector.CollectFinalFeedback();
+            }
+        }
+
+        private void Update()
+        {
+            if (!enableDebugShortcuts || !isExperienceActive)
+            {
+                return;
+            }
+
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                EndExperience();
+            }
+
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                resourceManager.PerformResourceAction(ResourceType.Energy);
+            }
+
+            if (Input.GetKeyDown(KeyCode.R))
+            {
+                ritualEngine.PerformValveInteraction();
+            }
+
+            if (Input.GetKeyDown(KeyCode.N))
+            {
+                stateMachine.SkipToNextState();
+            }
         }
 
         private void OnDestroy()
         {
-            if (isExperienceActive)
+            UnregisterCallbacks();
+
+            if (Instance == this)
             {
-                EndExperience();
+                Instance = null;
             }
         }
-    }
-
-    [System.Serializable]
-    public class LunarDayConfig
-    {
-        public int dayNumber;
-        public string dayName;
-        public string theme;
-        public float targetDurationMinutes = 4f;
-        public List<string> narrativeClips = new List<string>();
-        public List<string> documentaryClips = new List<string>();
-        public RitualConfig ritual;
-        public bool hasAnomaly = false;
-        public float anomalyChance = 0f;
-    }
-
-    [System.Serializable]
-    public class RitualConfig
-    {
-        public LunarDay targetDay;
-        public string ritualName;
-        public string description;
-        public List<RitualPhaseConfig> phases = new List<RitualPhaseConfig>();
-        public bool isDeepRitual = false;
-    }
-
-    [System.Serializable]
-    public class RitualPhaseConfig
-    {
-        public RitualPhase phase;
-        public float durationSeconds;
-        public string audioClipName;
-        public string voiceoverScript;
-        public bool requiresInteraction;
-        public string interactionTarget;
     }
 }

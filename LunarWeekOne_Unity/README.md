@@ -1,194 +1,86 @@
-# Lunar Week One - Unity Implementation
+# Lunar Week One Prototype
 
-一个沉浸式心理-文明模拟体验产品的Unity实现，基于原始项目文档的技术架构设计。
+This folder is a Unity prototype skeleton for the MoonStation concept.
+It is no longer treated as a complete, ready-made production project.
+Instead, it now provides:
 
-## 项目概述
+- a cleaned-up runtime flow for the 7-day experience loop
+- a shared data model and default config factory
+- save/load, ritual, resource, audio, and feedback systems
+- a runtime bootstrap that can scaffold a minimal playable scene
+- editor tools that can generate `StartupScene` and `LunarBase`
 
-**Lunar Week One｜月球站第一周**是一个介于实验性游戏、体验式纪录片和心理仪式系统之间的沉浸式心理模拟产品。核心目标是验证：人在极端环境中的体验是否能改变心理结构——提升心智稳定性、增强当下感、促进意义建构。
+## What You Can Do Right Now
 
-## 核心设计原则
+If you only want to verify the scripts quickly:
 
-- **无失败惩罚**：用户行为不触发"失败"状态，仅有状态变化
-- **无竞争**：完全排除对抗、排名、比较元素
-- **节奏极慢**：所有交互响应时间延长30%-50%
-- **克制表达**：避免情绪煽动、英雄叙事、成就反馈
-- **去娱乐化**：强调"存在"而非"有趣"
+1. Open any empty scene in Unity 2022 LTS.
+2. Enter Play Mode.
+3. `LunarPrototypeBootstrap` will create the minimum camera, systems, prototype nodes, ritual valve, floor, debug HUD, and feedback panel at runtime.
 
-## 系统架构
+If you want an actual startup flow:
 
-### 1. 核心系统模块
+1. Open Unity.
+2. Run `Lunar Week One/Create Prototype Scenes` from the menu.
+3. The tool will create:
+   - `Assets/Scenes/StartupScene.unity`
+   - `Assets/Scenes/LunarBase.unity`
+4. The tool also adds those scenes to Build Settings.
+5. Open `StartupScene` and enter Play Mode.
 
-```
-├── Core/
-│   ├── LunarExperienceController.cs      # 主控制器
-│   ├── LunarDayStateMachine.cs           # 月球日状态机
-│   ├── LunarInputHandler.cs              # 输入处理器
-│   ├── LunarStartupScene.cs              # 启动场景管理器
-│   ├── LunarCameraController.cs          # 相机控制器
-│   └── LunarEnvironmentController.cs     # 环境控制器
-├── Systems/
-│   ├── AudioTherapyEngine.cs             # 音频疗愈引擎
-│   ├── ResourceManager.cs                 # 资源管理系统
-│   ├── RitualEngine.cs                    # 心理仪式引擎
-│   ├── UserSessionManager.cs              # 用户会话管理
-│   └── ExperienceFeedbackCollector.cs     # 体验反馈收集
-├── UI/
-│   └── LunarHUDController.cs              # HUD控制器
-└── Data/
-    ├── LunarConstants.cs                  # 常量定义
-    ├── LunarConfigData.cs                 # 配置数据结构
-    └── (各种数据类型定义)
-```
+## Generated Scene Flow
 
-### 2. 四大核心模块
+`StartupScene`
 
-#### 2.1 模拟建筑与资源管理系统
-- 能源管理子系统：太阳能板角度调整
-- 氧循环监控子系统：抽象可视化
-- 水回收管理子系统：安全区间监控
-- 模块化建筑子系统：象征性拼接
+- shows Start New / Continue / Quit
+- disables Continue when no saved session exists
+- fades into the main experience scene
+- keeps startup UI references wired automatically
 
-#### 2.2 音频疗愈引擎
-- 低频环境嗡鸣层：40-80Hz，提供"在场感"
-- 中频呼吸引导层：BPM 60-68，与静息心率同步
-- 高频觉醒提示层：极少使用，标记"觉醒点"
+`LunarBase`
 
-#### 2.3 导演化叙事系统
-- 纪录片段：真实宇航员音频与历史影像
-- 剧情独白：第一人称内部独白
-- 环境空镜：月表、地球升起视觉奇观
+- is the main experience scene target
+- stays intentionally light as an editable shell
+- gets its minimum prototype content from `LunarPrototypeBootstrap` during Play Mode
 
-#### 2.4 心理仪式系统（灵魂模块）
-- 入仪、安身、定序、观照、出仪五阶段
-- Day 5深度仪式：7分钟完整体验
-- 非宗教化表达，只谈"稳定"、"清醒"、"在此"
+## Important Runtime Behavior
 
-## 技术规格
+- `LunarPrototypeBootstrap` now detects startup context and does not auto-spawn prototype gameplay objects in `StartupScene`.
+- `LunarExperienceController` no longer auto-starts the experience when the startup scene is active.
+- Returning to `StartupScene` now suspends the active experience shell instead of letting timers and decay continue in the background.
+- `UserSessionManager` keeps in-memory session intent, so `Start New` will not be overridden by an old save during scene transition.
 
-### 开发环境
-- **引擎**：Unity 2022 LTS (推荐)
-- **渲染管线**：URP (Universal Render Pipeline)
-- **音频引擎**：Unity Audio Mixer + FMOD/Wwise (可选)
-- **目标平台**：PC (Windows/macOS) 优先，VR版本可选
+## Main Scripts
 
-### 性能要求
-- 帧率：≥30 FPS (中等配置)
-- 内存占用：≤2GB (运行时峰值)
-- 包体大小：≤5GB (完整安装包)
-- 加载时间：≤30秒 (启动到Day 1)
+- `Assets/Scripts/Core/LunarExperienceController.cs`
+- `Assets/Scripts/Core/LunarDayStateMachine.cs`
+- `Assets/Scripts/Core/LunarPrototypeBootstrap.cs`
+- `Assets/Scripts/Core/LunarStartupScene.cs`
+- `Assets/Scripts/Systems/ResourceManager.cs`
+- `Assets/Scripts/Systems/RitualEngine.cs`
+- `Assets/Scripts/Systems/UserSessionManager.cs`
+- `Assets/Scripts/Systems/ExperienceFeedbackCollector.cs`
+- `Assets/Scripts/Editor/LunarConfigEditor.cs`
+- `Assets/Scripts/Editor/LunarSceneBuilder.cs`
 
-### 数据存储
-- 本地存储：SQLite + JSON
-- 隐私保护：无外部数据传输，无敏感信息收集
-- 数据保留：用户进度本地保存，匿名化处理
+## Story Reference
 
-## 使用方法
+- Detailed narrative bible: `../22步故事法_剧情设计圣经.md`
+- Scene-by-scene execution sheet: `../7天场景卡_叙事执行表.md`
+- Voice, log, and communication text library: `../旁白_日志_通信文本库.md`
+- Timeline and audio naming sheet: `../Timeline触发表_音频资产命名表.md`
+- Log and prop placement sheet: `../日志与物件投放表.md`
+- Default story data is encoded in `Assets/Scripts/Data/LunarDefaultConfigFactory.cs`
 
-### 1. 启动项目
-1. 使用Unity 2022 LTS打开项目
-2. 打开场景：`Assets/Scenes/StartupScene.unity`
-3. 运行游戏
+## Current Limits
 
-### 2. 核心交互
-- **鼠标左键**：选择/交互
-- **右键拖动**：控制相机视角
-- **滚轮**：缩放视角
-- **WASD**：移动相机
-- **ESC**：退出体验
-- **空格键**：执行能源操作
-- **R键**：执行仪式阀门操作
-- **N键**：跳转到下一阶段
+- No real production scenes, models, or audio assets are included yet.
+- The generated scenes are starter shells, not final content.
+- This repo has been statically refactored, but it has not been Play Mode tested in this environment because Unity is not available here.
 
-### 3. 系统配置
-在`LunarExperienceController.cs`中可以配置：
-- 是否加载保存进度
-- 体验超时时间
-- 是否启用教程
+## Recommended Next Step
 
-## 项目文件说明
+After generating the scenes in Unity, decide which direction to take:
 
-### 核心脚本功能
-
-| 脚本文件 | 主要功能 |
-|---------|----------|
-| `LunarExperienceController` | 整合所有系统，管理整个体验流程 |
-| `LunarDayStateMachine` | 管理7个月球日的状态流转 |
-| `AudioTherapyEngine` | 控制音频层次和呼吸引导 |
-| `ResourceManager` | 管理能源、氧气、水资源状态 |
-| `RitualEngine` | 执行心理仪式的五阶段流程 |
-| `UserSessionManager` | 保存和加载用户进度数据 |
-| `ExperienceFeedbackCollector` | 收集体验后反馈问卷 |
-
-### 数据文件
-| 文件 | 说明 |
-|-----|------|
-| `LunarConstants.cs` | 定义常量、枚举、阈值 |
-| `LunarConfigData.cs` | 配置数据结构定义 |
-| `Resources/Configs/` | JSON配置文件和音频资源 |
-
-## 开发建议
-
-### 1. 音频资源准备
-- 低频嗡鸣音：40-80Hz持续音
-- 呼吸引导音：60-68 BPM节拍
-- 叙事语音：克制、平静的语音素材
-- 环境音效：月球基地机械音
-
-### 2. 视觉资源
-- 场景：简洁的月球基地内部
-- 材质：冷色调金属、磨砂玻璃
-- 光照：强调体积光，色温偏冷
-- 特效：极简粒子效果
-
-### 3. 配置调优
-在`LunarConstants.cs`中调整：
-- 交互延迟时间
-- 资源衰减速率
-- 仪式阶段时长
-- 音频混合参数
-
-## 验收标准
-
-### 功能验收
-- [ ] 体验时长严格控制在30分钟（±1分钟）
-- [ ] ≥80%用户完成全程体验
-- [ ] Day 5深度仪式完成率≥90%
-- [ ] 音频播放无卡顿、无循环痕迹
-
-### 用户体验验收
-- [ ] 平均反馈得分≥4/5
-- [ ] "仪式后感到更平静"得分≥4/5
-- [ ] "仪式的语言表达让我感到舒适"得分≥4/5
-- [ ] "我感到自己真的'在那里'"得分≥4/5
-
-### 技术验收
-- [ ] 帧率≥30 FPS（持续）
-- [ ] 启动时间≤30秒
-- [ ] 崩溃率≤1%（每1000次启动）
-- [ ] 内存占用≤2GB
-
-## 后续迭代计划
-
-| 阶段 | 目标 | 预计时长 |
-|------|------|----------|
-| MVP | 验证核心体验假设 | 3-4个月 |
-| Phase 2 | 增加更多月球日单元 | 2-3个月 |
-| Phase 3 | 增加VR支持 | 3-4个月 |
-| Phase 4 | 支持生理数据接入（心率等） | 2-3个月 |
-| Phase 5 | 研究版本（与学术机构合作） | 待定 |
-
-## 贡献指南
-
-1. 确保所有代码遵循项目设计原则（克制、去娱乐化）
-2. 音频修改必须经过心理效果测试
-3. UI设计必须极简，避免HUD
-4. 所有用户数据必须本地化，无云同步
-
-## 许可证
-
-本项目基于商业使用许可证开发，具体细节请参考原始项目文档。
-
----
-**项目状态**：MVP阶段开发中  
-**版本**：1.0.0  
-**最后更新**：2025年1月28日
+- keep the runtime bootstrap as a fast prototype path
+- or replace the generated placeholder content inside `LunarBase` with authored scene objects and assets

@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using Lunar.Data;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -9,11 +11,6 @@ namespace Lunar.Core
     public class ResourceManager : MonoBehaviour
     {
         public static ResourceManager Instance { get; private set; }
-
-        [Header("Resource Values")]
-        [SerializeField] private float energyLevel = 0.8f;
-        [SerializeField] private float oxygenLevel = 0.8f;
-        [SerializeField] private float waterLevel = 0.8f;
 
         [Header("Thresholds")]
         [SerializeField] private float safeThreshold = 0.5f;
@@ -25,13 +22,16 @@ namespace Lunar.Core
         [SerializeField] private Volume postProcessVolume;
 
         [Header("Settings")]
-        [SerializeField] private bool managementEnabled = false;
+        [SerializeField] private bool managementEnabled;
         [SerializeField] private float interactionDelay = 0.4f;
-        [SerializeField] private float animationDuration = 2f;
+        [SerializeField] private float animationDuration = 0.4f;
+
+        private readonly Dictionary<ResourceType, float> resourceValues = new Dictionary<ResourceType, float>();
+        private readonly Dictionary<ResourceType, ResourceConfig> resourceConfigs = new Dictionary<ResourceType, ResourceConfig>();
+        private readonly ResourceType[] trackedTypes = (ResourceType[])Enum.GetValues(typeof(ResourceType));
 
         private float lastInteractionTime;
         private bool isAnomalyActive;
-        private Dictionary<ResourceType, float> resourceValues = new Dictionary<ResourceType, float>();
 
         public event Action<ResourceType, float> OnResourceChanged;
         public event Action<ResourceType> OnResourceCritical;
@@ -41,54 +41,88 @@ namespace Lunar.Core
 
         private void Awake()
         {
-            if (Instance == null)
-            {
-                Instance = this;
-                DontDestroyOnLoad(gameObject);
-            }
-            else
+            if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
+                return;
             }
 
-            InitializeResources();
-        }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
 
-        private void InitializeResources()
-        {
-            resourceValues[ResourceType.Energy] = energyLevel;
-            resourceValues[ResourceType.Oxygen] = oxygenLevel;
-            resourceValues[ResourceType.Water] = waterLevel;
-        }
-
-        private void Start()
-        {
-            UpdateAllVisualFeedback();
+            BuildDefaultConfigs();
+            ResetResources();
         }
 
         private void Update()
         {
-            if (!managementEnabled || isAnomalyActive) return;
+            if (!managementEnabled || isAnomalyActive)
+            {
+                return;
+            }
 
             float deltaTime = Time.deltaTime;
 
-            foreach (var kvp in resourceValues)
+            foreach (ResourceType type in trackedTypes)
             {
-                if (kvp.Value > warningThreshold)
+                float currentValue = GetResource(type);
+                float decayRate = GetConfig(type).decayRate;
+                float minimum = GetConfig(type).minValue;
+
+                if (currentValue <= minimum)
                 {
-                    float newValue = Mathf.Max(warningThreshold, kvp.Value - GetDecayRate(kvp.Key) * deltaTime);
-                    if (Mathf.Abs(newValue - kvp.Value) > 0.001f)
-                    {
-                        SetResource(kvp.Key, newValue);
-                    }
+                    continue;
+                }
+
+                SetResource(type, Mathf.Max(minimum, currentValue - decayRate * deltaTime));
+            }
+        }
+
+        private void BuildDefaultConfigs()
+        {
+            resourceConfigs[ResourceType.Energy] = new ResourceConfig
+            {
+                type = ResourceType.Energy,
+                decayRate = 0.002f,
+                recoveryRate = 0.12f
+            };
+            resourceConfigs[ResourceType.Oxygen] = new ResourceConfig
+            {
+                type = ResourceType.Oxygen,
+                decayRate = 0.0012f,
+                recoveryRate = 0.1f
+            };
+            resourceConfigs[ResourceType.Water] = new ResourceConfig
+            {
+                type = ResourceType.Water,
+                decayRate = 0.0015f,
+                recoveryRate = 0.1f
+            };
+        }
+
+        public void ApplyDayConfig(LunarDayConfig config)
+        {
+            if (config == null)
+            {
+                return;
+            }
+
+            foreach (ResourceConfig resourceConfig in config.resources)
+            {
+                resourceConfigs[resourceConfig.type] = resourceConfig;
+
+                if (!resourceValues.ContainsKey(resourceConfig.type))
+                {
+                    resourceValues[resourceConfig.type] = Mathf.Clamp(resourceConfig.initialValue, 0f, 1f);
                 }
             }
+
+            UpdateAllVisualFeedback();
         }
 
         public void EnableManagement()
         {
             managementEnabled = true;
-            StartResourceDecay();
         }
 
         public void DisableManagement()
@@ -99,17 +133,17 @@ namespace Lunar.Core
         public void SetResource(ResourceType type, float value)
         {
             float clampedValue = Mathf.Clamp01(value);
-            float oldValue = resourceValues.ContainsKey(type) ? resourceValues[type] : 0f;
+            float previousValue = resourceValues.ContainsKey(type) ? resourceValues[type] : 0f;
             resourceValues[type] = clampedValue;
 
-            OnResourceChanged?.Invoke(type, clampedValue);
             UpdateVisualFeedback(type, clampedValue);
+            OnResourceChanged?.Invoke(type, clampedValue);
 
-            if (oldValue > warningThreshold && clampedValue <= warningThreshold)
+            if (previousValue > warningThreshold && clampedValue <= warningThreshold)
             {
                 OnResourceCritical?.Invoke(type);
             }
-            else if (oldValue <= warningThreshold && clampedValue > warningThreshold)
+            else if (previousValue <= warningThreshold && clampedValue > warningThreshold)
             {
                 OnResourceRestored?.Invoke(type, clampedValue);
             }
@@ -117,12 +151,20 @@ namespace Lunar.Core
 
         public float GetResource(ResourceType type)
         {
-            return resourceValues.ContainsKey(type) ? resourceValues[type] : 0f;
+            if (!resourceValues.ContainsKey(type))
+            {
+                resourceValues[type] = GetConfig(type).initialValue;
+            }
+
+            return resourceValues[type];
         }
 
         public void PerformResourceAction(ResourceType type)
         {
-            if (!managementEnabled) return;
+            if (!managementEnabled)
+            {
+                return;
+            }
 
             if (Time.time - lastInteractionTime < interactionDelay)
             {
@@ -130,149 +172,60 @@ namespace Lunar.Core
             }
 
             lastInteractionTime = Time.time;
-
-            AudioTherapyEngine.Instance?.PlayInteractionFeedback(type);
-
             StartCoroutine(AnimateResourceAction(type));
+            AudioTherapyEngine.Instance?.PlayInteractionFeedback(type);
+            UserSessionManager.Instance?.RecordInteraction();
         }
 
-        private System.Collections.IEnumerator AnimateResourceAction(ResourceType type)
+        private IEnumerator AnimateResourceAction(ResourceType type)
         {
+            ResourceConfig config = GetConfig(type);
             float startValue = GetResource(type);
-            float targetValue = Mathf.Min(1f, startValue + 0.1f);
+            float targetValue = Mathf.Clamp(startValue + config.recoveryRate, 0f, config.maxValue);
             float elapsed = 0f;
 
             while (elapsed < animationDuration)
             {
                 elapsed += Time.deltaTime;
-                float t = elapsed / animationDuration;
-                float currentValue = Mathf.Lerp(startValue, targetValue, t);
-                SetResource(type, currentValue);
+                float t = Mathf.Clamp01(elapsed / animationDuration);
+                SetResource(type, Mathf.Lerp(startValue, targetValue, t));
                 yield return null;
             }
 
             SetResource(type, targetValue);
         }
 
-        private void UpdateAllVisualFeedback()
+        public void TriggerAnomaly()
         {
-            foreach (var kvp in resourceValues)
+            if (isAnomalyActive)
             {
-                UpdateVisualFeedback(kvp.Key, kvp.Value);
-            }
-            UpdateBaseLighting();
-        }
-
-        private void UpdateVisualFeedback(ResourceType type, float value)
-        {
-            if (resourceIndicatorMaterials == null || resourceIndicatorMaterials.Length < 3)
-            {
-                UpdateBaseLighting();
                 return;
             }
 
-            int matIndex = (int)type;
-            if (matIndex < 0 || matIndex >= resourceIndicatorMaterials.Length) return;
-
-            Material mat = resourceIndicatorMaterials[matIndex];
-            if (mat == null) return;
-
-            Color targetColor = GetColorForValue(value);
-
-            if (mat.HasProperty("_EmissionColor"))
-            {
-                mat.SetColor("_EmissionColor", targetColor * 2f);
-            }
-            if (mat.HasProperty("_Color"))
-            {
-                mat.SetColor("_Color", targetColor);
-            }
-        }
-
-        private void UpdateBaseLighting()
-        {
-            if (baseLight == null) return;
-
-            float avgValue = (GetResource(ResourceType.Energy) + GetResource(ResourceType.Oxygen) + GetResource(ResourceType.Water)) / 3f;
-            float brightness = Mathf.Lerp(0.3f, 1f, avgValue);
-
-            baseLight.intensity = brightness;
-
-            if (postProcessVolume != null && postProcessVolume.profile.TryGet(out ColorAdjustments colorAdj))
-            {
-                colorAdj.postExposure.value = Mathf.Lerp(-0.5f, 0.5f, avgValue);
-            }
-        }
-
-        private Color GetColorForValue(float value)
-        {
-            if (value > safeThreshold)
-            {
-                return new Color(0.2f, 0.9f, 0.4f);
-            }
-            else if (value > warningThreshold)
-            {
-                return new Color(0.9f, 0.7f, 0.2f);
-            }
-            else
-            {
-                return new Color(0.9f, 0.3f, 0.2f);
-            }
-        }
-
-        private float GetDecayRate(ResourceType type)
-        {
-            switch (type)
-            {
-                case ResourceType.Energy: return 0.002f;
-                case ResourceType.Oxygen: return 0.001f;
-                case ResourceType.Water: return 0.0015f;
-                default: return 0.001f;
-            }
-        }
-
-        private void StartResourceDecay()
-        {
-            foreach (var type in Enum.GetValues(typeof(ResourceType)))
-            {
-                if (resourceValues.ContainsKey((ResourceType)type) &&
-                    resourceValues[(ResourceType)type] > warningThreshold)
-                {
-                    OnResourceRestored?.Invoke((ResourceType)type, resourceValues[(ResourceType)type]);
-                }
-            }
-        }
-
-        public void TriggerAnomaly()
-        {
-            if (isAnomalyActive) return;
-
             isAnomalyActive = true;
             OnAnomalyStarted?.Invoke();
-
             StartCoroutine(AnimateAnomaly());
         }
 
-        private System.Collections.IEnumerator AnimateAnomaly()
+        private IEnumerator AnimateAnomaly()
         {
-            float anomalyDuration = 8f;
+            const float anomalyDuration = 6f;
             float elapsed = 0f;
 
             while (elapsed < anomalyDuration)
             {
                 elapsed += Time.deltaTime;
-
-                float flicker = Mathf.PingPong(elapsed * 5f, 0.3f);
+                float flicker = Mathf.PingPong(elapsed * 4f, 0.3f);
 
                 if (baseLight != null)
                 {
                     baseLight.intensity = 0.6f + flicker;
                 }
 
-                foreach (var kvp in resourceValues)
+                foreach (ResourceType type in trackedTypes)
                 {
-                    float noisyValue = kvp.Value + UnityEngine.Random.Range(-0.05f, 0.05f);
-                    SetResource(kvp.Key, Mathf.Clamp01(noisyValue));
+                    float noisyValue = GetResource(type) + UnityEngine.Random.Range(-0.03f, 0.03f);
+                    SetResource(type, noisyValue);
                 }
 
                 yield return null;
@@ -284,9 +237,83 @@ namespace Lunar.Core
         private void ResolveAnomaly()
         {
             isAnomalyActive = false;
-            OnAnomalyResolved?.Invoke();
-
             UpdateAllVisualFeedback();
+            OnAnomalyResolved?.Invoke();
+        }
+
+        private void UpdateAllVisualFeedback()
+        {
+            foreach (ResourceType type in trackedTypes)
+            {
+                UpdateVisualFeedback(type, GetResource(type));
+            }
+
+            UpdateBaseLighting();
+        }
+
+        private void UpdateVisualFeedback(ResourceType type, float value)
+        {
+            int materialIndex = (int)type;
+            if (resourceIndicatorMaterials != null &&
+                materialIndex >= 0 &&
+                materialIndex < resourceIndicatorMaterials.Length &&
+                resourceIndicatorMaterials[materialIndex] != null)
+            {
+                Material material = resourceIndicatorMaterials[materialIndex];
+                Color targetColor = GetColorForValue(value, GetConfig(type));
+
+                if (material.HasProperty("_Color"))
+                {
+                    material.SetColor("_Color", targetColor);
+                }
+
+                if (material.HasProperty("_EmissionColor"))
+                {
+                    material.SetColor("_EmissionColor", targetColor * 2f);
+                }
+            }
+
+            UpdateBaseLighting();
+        }
+
+        private void UpdateBaseLighting()
+        {
+            if (baseLight != null)
+            {
+                float average = GetAverageResourceLevel();
+                baseLight.intensity = Mathf.Lerp(0.3f, 1f, average);
+            }
+
+            if (postProcessVolume != null && postProcessVolume.profile != null &&
+                postProcessVolume.profile.TryGet(out ColorAdjustments colorAdjustments))
+            {
+                colorAdjustments.postExposure.value = Mathf.Lerp(-0.5f, 0.3f, GetAverageResourceLevel());
+            }
+        }
+
+        private Color GetColorForValue(float value, ResourceConfig config)
+        {
+            if (value > safeThreshold)
+            {
+                return config.safeColor;
+            }
+
+            if (value > warningThreshold)
+            {
+                return config.warningColor;
+            }
+
+            return config.criticalColor;
+        }
+
+        private ResourceConfig GetConfig(ResourceType type)
+        {
+            if (!resourceConfigs.ContainsKey(type))
+            {
+                resourceConfigs[type] = new ResourceConfig { type = type };
+            }
+
+            return resourceConfigs[type];
         }
 
         public bool IsResourceSafe(ResourceType type)
@@ -296,21 +323,41 @@ namespace Lunar.Core
 
         public float GetAverageResourceLevel()
         {
-            float sum = 0f;
-            int count = 0;
-            foreach (var kvp in resourceValues)
+            float total = 0f;
+
+            foreach (ResourceType type in trackedTypes)
             {
-                sum += kvp.Value;
-                count++;
+                total += GetResource(type);
             }
-            return count > 0 ? sum / count : 0f;
+
+            return total / trackedTypes.Length;
         }
 
         public void ResetResources()
         {
-            InitializeResources();
+            foreach (ResourceType type in trackedTypes)
+            {
+                resourceValues[type] = Mathf.Clamp(GetConfig(type).initialValue, 0f, 1f);
+            }
+
             isAnomalyActive = false;
             UpdateAllVisualFeedback();
+        }
+
+        public void RestoreResourceLevels(float energy, float oxygen, float water)
+        {
+            resourceValues[ResourceType.Energy] = Mathf.Clamp01(energy);
+            resourceValues[ResourceType.Oxygen] = Mathf.Clamp01(oxygen);
+            resourceValues[ResourceType.Water] = Mathf.Clamp01(water);
+            UpdateAllVisualFeedback();
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
         }
     }
 }
