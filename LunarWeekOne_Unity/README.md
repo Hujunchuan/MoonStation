@@ -1,5 +1,8 @@
 # Lunar Week One Prototype
 
+This folder is the Unity project root for the MoonStation prototype.
+Open `LunarWeekOne_Unity` directly in Unity Hub / Unity 2022 LTS.
+
 This folder is a Unity prototype skeleton for the MoonStation concept.
 It is no longer treated as a complete, ready-made production project.
 Instead, it now provides:
@@ -17,6 +20,7 @@ If you only want to verify the scripts quickly:
 1. Open any empty scene in Unity 2022 LTS.
 2. Enter Play Mode.
 3. `LunarPrototypeBootstrap` will create the minimum camera, systems, prototype nodes, ritual valve, floor, debug HUD, and feedback panel at runtime.
+4. If no clips exist under `Assets/Resources/Audio`, the prototype will generate fallback ambient, breath, and cue audio automatically.
 
 If you want an actual startup flow:
 

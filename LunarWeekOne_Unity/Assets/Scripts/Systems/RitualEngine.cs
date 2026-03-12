@@ -104,10 +104,21 @@ namespace Lunar.Core
                 OnPhaseChanged?.Invoke(currentPhase);
 
                 float elapsed = 0f;
-                while (elapsed < phase.durationSeconds)
+                while (elapsed < phase.durationSeconds || (phase.requiresInteraction && !phaseInteractionSatisfied))
                 {
-                    elapsed += Time.deltaTime;
-                    OnPhaseProgress?.Invoke(currentPhase, Mathf.Clamp01(elapsed / phase.durationSeconds));
+                    if (elapsed < phase.durationSeconds)
+                    {
+                        elapsed += Time.deltaTime;
+                    }
+
+                    float durationProgress = phase.durationSeconds <= 0f
+                        ? 1f
+                        : Mathf.Clamp01(elapsed / phase.durationSeconds);
+                    float progress = phase.requiresInteraction && !phaseInteractionSatisfied && durationProgress >= 1f
+                        ? 0.98f
+                        : durationProgress;
+
+                    OnPhaseProgress?.Invoke(currentPhase, progress);
                     yield return null;
                 }
             }
@@ -303,6 +314,14 @@ namespace Lunar.Core
         public RitualPhase GetCurrentPhase()
         {
             return currentPhase;
+        }
+
+        public bool IsAwaitingRequiredInteraction()
+        {
+            return isRitualActive &&
+                currentPhaseConfig != null &&
+                currentPhaseConfig.requiresInteraction &&
+                !phaseInteractionSatisfied;
         }
 
         public float GetRitualProgress()

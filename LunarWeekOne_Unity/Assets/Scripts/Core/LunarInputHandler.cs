@@ -90,6 +90,7 @@ namespace Lunar.Core
         private void PerformInteraction()
         {
             if (mainCamera == null) return;
+            if (Time.time - lastInteractionTime < interactionCooldown) return;
 
             Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
@@ -97,40 +98,40 @@ namespace Lunar.Core
             if (Physics.Raycast(ray, out hit, maxInteractionDistance, GetEffectiveLayerMask()))
             {
                 GameObject hitObject = hit.collider.gameObject;
-                ProcessInteraction(hitObject, hit.point);
-
-                if (Time.time - lastInteractionTime < interactionCooldown) return;
-                lastInteractionTime = Time.time;
+                if (ProcessInteraction(hitObject, hit.point))
+                {
+                    lastInteractionTime = Time.time;
+                }
             }
         }
 
-        private void ProcessInteraction(GameObject target, Vector3 hitPoint)
+        private bool ProcessInteraction(GameObject target, Vector3 hitPoint)
         {
-            if (target == null) return;
+            if (target == null) return false;
 
             Interactable interactable = target.GetComponent<Interactable>();
             if (interactable != null)
             {
                 interactable.OnInteract(hitPoint);
-                return;
+                return true;
             }
 
             if (target.CompareTag("Resource_Energy"))
             {
                 ResourceManager.Instance?.PerformResourceAction(ResourceType.Energy);
-                return;
+                return true;
             }
 
             if (target.CompareTag("Resource_Oxygen"))
             {
                 ResourceManager.Instance?.PerformResourceAction(ResourceType.Oxygen);
-                return;
+                return true;
             }
 
             if (target.CompareTag("Resource_Water"))
             {
                 ResourceManager.Instance?.PerformResourceAction(ResourceType.Water);
-                return;
+                return true;
             }
 
             if (target.CompareTag("Ritual_Valve") && RitualEngine.Instance != null)
@@ -138,15 +139,19 @@ namespace Lunar.Core
                 if (RitualEngine.Instance.IsRitualActive())
                 {
                     RitualEngine.Instance.PerformValveInteraction();
+                    return true;
                 }
-                return;
+
+                return false;
             }
 
             if (target.CompareTag("Ritual_Start"))
             {
                 LunarDayStateMachine.Instance?.SkipToNextState();
-                return;
+                return true;
             }
+
+            return false;
         }
 
         private void UpdateHoverTarget()

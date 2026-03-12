@@ -92,12 +92,16 @@ namespace Lunar.Core
             }
 
             LunarDayStateMachine stateMachine = LunarDayStateMachine.Instance;
+            RitualEngine ritualEngine = RitualEngine.Instance;
             var config = stateMachine != null ? stateMachine.GetCurrentConfig() : null;
             string questionLine = config != null ? config.dramaticQuestion : "Question unavailable";
+            string interactionHint = ritualEngine != null && ritualEngine.IsAwaitingRequiredInteraction()
+                ? "Ritual ready: click the valve or press R to continue"
+                : "Left click nodes to recover resources";
 
             hintText.text =
                 $"Question: {questionLine}\n" +
-                "Left click nodes to recover resources\n" +
+                $"{interactionHint}\n" +
                 "R to interact with ritual valve, N to skip, ESC to end";
         }
 

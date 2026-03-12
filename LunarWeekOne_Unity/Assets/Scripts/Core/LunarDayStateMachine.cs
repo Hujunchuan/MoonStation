@@ -95,10 +95,7 @@ namespace Lunar.Core
                 case LunarDayState.Narration:
                     if (config != null)
                     {
-                        foreach (string clip in config.narrativeClips)
-                        {
-                            AudioTherapyEngine.Instance?.PlayNarrative(clip);
-                        }
+                        AudioTherapyEngine.Instance?.PlayNarrativeSequence(config.narrativeClips);
                     }
                     break;
 
