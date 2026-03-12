@@ -280,7 +280,8 @@ namespace Lunar.Editor
             CreateDirectionalLight("LunarBase Directional Light", 1f, Quaternion.Euler(45f, -30f, 0f));
 
             GameObject root = new GameObject("LunarBaseRoot");
-            CreateTextMesh(root.transform, "Play Mode will bootstrap the prototype scene scaffold.", new Vector3(0f, 2f, 4f));
+            LunarPrototypeSceneKit.EnsureGreyboxShell(root.transform);
+            CreateTextMesh(root.transform, "MoonStation greybox shell ready for authored replacement.", new Vector3(0f, 2.4f, -5.8f));
 
             EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene(), ExperienceScenePath);
             return ExperienceScenePath;

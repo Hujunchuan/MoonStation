@@ -56,7 +56,9 @@ namespace Lunar.Core
                 return;
             }
 
-            EnsurePrototypeObjects();
+            LunarPrototypeReferenceHub hub = EnsurePrototypeObjects();
+            ConfigurePrototypeSystems(hub);
+            EnsureCameraAnchor(hub);
             EnsurePrototypeUi();
         }
 
@@ -169,75 +171,82 @@ namespace Lunar.Core
             eventSystemObject.AddComponent<StandaloneInputModule>();
         }
 
-        private void EnsurePrototypeObjects()
+        private LunarPrototypeReferenceHub EnsurePrototypeObjects()
         {
-            CreateResourceNode("Energy Node", ResourceType.Energy, new Vector3(-2f, 1f, 3f), new Color(1f, 0.85f, 0.2f));
-            CreateResourceNode("Oxygen Node", ResourceType.Oxygen, new Vector3(0f, 1f, 3f), new Color(0.4f, 0.8f, 1f));
-            CreateResourceNode("Water Node", ResourceType.Water, new Vector3(2f, 1f, 3f), new Color(0.2f, 0.9f, 0.7f));
-            CreateRitualValve("Ritual Valve", new Vector3(0f, 1f, 6f));
-            CreateFloor();
+            return LunarPrototypeSceneKit.EnsureGreyboxShell();
         }
 
-        private void CreateResourceNode(string objectName, ResourceType resourceType, Vector3 position, Color color)
+        private void ConfigurePrototypeSystems(LunarPrototypeReferenceHub hub)
         {
-            if (GameObject.Find(objectName) != null)
+            if (hub == null)
             {
                 return;
             }
 
-            GameObject node = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            node.name = objectName;
-            node.transform.position = position;
-            node.transform.localScale = new Vector3(1.2f, 1.2f, 1.2f);
-
-            Renderer renderer = node.GetComponent<Renderer>();
-            if (renderer != null)
+            ResourceManager resourceManager = ResourceManager.Instance;
+            if (resourceManager != null)
             {
-                renderer.material.color = color;
+                Material[] resourceMaterials = new Material[hub.ResourceRenderers != null ? hub.ResourceRenderers.Length : 0];
+                for (int index = 0; index < resourceMaterials.Length; index++)
+                {
+                    if (hub.ResourceRenderers[index] != null)
+                    {
+                        resourceMaterials[index] = hub.ResourceRenderers[index].material;
+                    }
+                }
+
+                resourceManager.ConfigurePrototypeVisuals(hub.BaseStatusLight, resourceMaterials);
             }
 
-            ResourceInteractable interactable = node.AddComponent<ResourceInteractable>();
-            interactable.Configure(resourceType, color);
+            RitualEngine ritualEngine = RitualEngine.Instance;
+            if (ritualEngine != null)
+            {
+                ritualEngine.ConfigurePresentation(
+                    hub.RitualIndicator,
+                    hub.InteriorLights,
+                    hub.RitualValveRenderer != null ? hub.RitualValveRenderer.material : null);
+            }
+
+            LunarEnvironmentController environmentController = FindObjectOfType<LunarEnvironmentController>();
+            if (environmentController != null)
+            {
+                environmentController.ConfigurePrototypeEnvironment(
+                    FindMainDirectionalLight(),
+                    hub.InteriorLights,
+                    hub.RitualAmbientLight,
+                    hub.DustParticles,
+                    hub.AnomalyParticles);
+            }
         }
 
-        private void CreateRitualValve(string objectName, Vector3 position)
+        private void EnsureCameraAnchor(LunarPrototypeReferenceHub hub)
         {
-            if (GameObject.Find(objectName) != null)
+            if (hub == null || hub.PlayerAnchor == null || Camera.main == null)
             {
                 return;
             }
 
-            GameObject valve = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            valve.name = objectName;
-            valve.transform.position = position;
-            valve.transform.localScale = new Vector3(1f, 0.3f, 1f);
-
-            Renderer renderer = valve.GetComponent<Renderer>();
-            if (renderer != null)
-            {
-                renderer.material.color = new Color(0.4f, 0.8f, 1f);
-            }
-
-            valve.AddComponent<RitualValveInteractable>();
-        }
-
-        private void CreateFloor()
-        {
-            if (GameObject.Find("Prototype Floor") != null)
+            if (Camera.main.transform.position.z > -7.5f && Camera.main.transform.position.z < 10f)
             {
                 return;
             }
 
-            GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            floor.name = "Prototype Floor";
-            floor.transform.position = Vector3.zero;
-            floor.transform.localScale = new Vector3(2f, 1f, 2f);
+            Camera.main.transform.position = hub.PlayerAnchor.position;
+            Camera.main.transform.rotation = hub.PlayerAnchor.rotation;
+        }
 
-            Renderer renderer = floor.GetComponent<Renderer>();
-            if (renderer != null)
+        private Light FindMainDirectionalLight()
+        {
+            Light[] lights = FindObjectsOfType<Light>();
+            foreach (Light light in lights)
             {
-                renderer.material.color = new Color(0.12f, 0.12f, 0.16f);
+                if (light != null && light.type == LightType.Directional)
+                {
+                    return light;
+                }
             }
+
+            return null;
         }
 
         private void EnsurePrototypeUi()

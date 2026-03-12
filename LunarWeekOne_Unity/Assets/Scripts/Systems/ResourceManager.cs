@@ -352,6 +352,19 @@ namespace Lunar.Core
             UpdateAllVisualFeedback();
         }
 
+        public void ConfigurePrototypeVisuals(Light statusLight, Material[] indicatorMaterials, Volume volume = null)
+        {
+            baseLight = statusLight;
+            resourceIndicatorMaterials = indicatorMaterials;
+
+            if (volume != null)
+            {
+                postProcessVolume = volume;
+            }
+
+            UpdateAllVisualFeedback();
+        }
+
         private void OnDestroy()
         {
             if (Instance == this)

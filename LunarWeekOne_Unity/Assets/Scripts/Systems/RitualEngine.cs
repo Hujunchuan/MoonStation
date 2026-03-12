@@ -334,6 +334,18 @@ namespace Lunar.Core
             return Mathf.Clamp01((Time.time - ritualStartTime) / totalRitualDuration);
         }
 
+        public void ConfigurePresentation(GameObject indicator, Light[] baseLights, Material valveInteractionMaterial)
+        {
+            ritualIndicator = indicator;
+            ritualLights = baseLights;
+            valveMaterial = valveInteractionMaterial;
+
+            if (!isRitualActive && ritualIndicator != null)
+            {
+                ritualIndicator.SetActive(false);
+            }
+        }
+
         private void OnDestroy()
         {
             if (Instance == this)

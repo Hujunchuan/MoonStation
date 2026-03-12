@@ -341,5 +341,20 @@ namespace Lunar.Core
         {
             return currentDay;
         }
+
+        public void ConfigurePrototypeEnvironment(
+            Light directionalLight,
+            Light[] shellLights,
+            Light ritualLight,
+            ParticleSystem dust,
+            ParticleSystem anomaly)
+        {
+            mainDirectionalLight = directionalLight;
+            interiorLights = shellLights;
+            ritualAmbientLight = ritualLight;
+            dustParticles = dust;
+            anomalyParticles = anomaly;
+            ApplyStateImmediate(currentState);
+        }
     }
 }

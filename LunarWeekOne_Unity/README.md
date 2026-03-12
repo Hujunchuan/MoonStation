@@ -12,6 +12,7 @@ Instead, it now provides:
 - save/load, ritual, resource, audio, and feedback systems
 - a runtime bootstrap that can scaffold a minimal playable scene
 - editor tools that can generate `StartupScene` and `LunarBase`
+- a reusable moonstation greybox shell for both empty-scene Play Mode and generated scenes
 
 ## What You Can Do Right Now
 
@@ -44,8 +45,8 @@ If you want an actual startup flow:
 `LunarBase`
 
 - is the main experience scene target
-- stays intentionally light as an editable shell
-- gets its minimum prototype content from `LunarPrototypeBootstrap` during Play Mode
+- now includes a reusable greybox moonstation shell for editing and blocking
+- still gets system wiring and fallback content from `LunarPrototypeBootstrap` during Play Mode
 
 ## Important Runtime Behavior
 
