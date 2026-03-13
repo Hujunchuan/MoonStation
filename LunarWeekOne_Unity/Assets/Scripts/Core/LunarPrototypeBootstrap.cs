@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -59,7 +61,8 @@ namespace Lunar.Core
             LunarPrototypeReferenceHub hub = EnsurePrototypeObjects();
             ConfigurePrototypeSystems(hub);
             EnsureCameraAnchor(hub);
-            EnsurePrototypeUi();
+            ConfigureCameraFocus(hub);
+            EnsurePrototypeUi(hub);
         }
 
         private void ConfigureExperienceController(bool isStartupScene)
@@ -210,13 +213,20 @@ namespace Lunar.Core
             LunarEnvironmentController environmentController = FindObjectOfType<LunarEnvironmentController>();
             if (environmentController != null)
             {
+                Volume prototypeVolume = EnsurePrototypeVolume();
+                Material prototypeSkybox = EnsurePrototypeSkybox(FindMainDirectionalLight());
                 environmentController.ConfigurePrototypeEnvironment(
                     FindMainDirectionalLight(),
                     hub.InteriorLights,
                     hub.RitualAmbientLight,
                     hub.DustParticles,
-                    hub.AnomalyParticles);
+                    hub.AnomalyParticles,
+                    prototypeVolume,
+                    prototypeSkybox);
             }
+
+            ConfigureGuidePresentation(hub);
+            ConfigureSceneryPresentation(hub);
         }
 
         private void EnsureCameraAnchor(LunarPrototypeReferenceHub hub)
@@ -235,6 +245,33 @@ namespace Lunar.Core
             Camera.main.transform.rotation = hub.PlayerAnchor.rotation;
         }
 
+        private void ConfigureCameraFocus(LunarPrototypeReferenceHub hub)
+        {
+            if (hub == null || Camera.main == null)
+            {
+                return;
+            }
+
+            LunarCameraController cameraController = Camera.main.GetComponent<LunarCameraController>();
+            if (cameraController == null)
+            {
+                return;
+            }
+
+            LunarPrototypeFocusDirector focusDirector = Camera.main.GetComponent<LunarPrototypeFocusDirector>();
+            if (focusDirector == null)
+            {
+                focusDirector = Camera.main.gameObject.AddComponent<LunarPrototypeFocusDirector>();
+            }
+
+            focusDirector.Configure(
+                cameraController,
+                hub.PlayerAnchor,
+                hub.ResourceFocusAnchor,
+                hub.RitualFocusAnchor,
+                hub.QuietDeckFocusAnchor);
+        }
+
         private Light FindMainDirectionalLight()
         {
             Light[] lights = FindObjectsOfType<Light>();
@@ -249,14 +286,163 @@ namespace Lunar.Core
             return null;
         }
 
-        private void EnsurePrototypeUi()
+        private void ConfigureGuidePresentation(LunarPrototypeReferenceHub hub)
+        {
+            if (hub == null)
+            {
+                return;
+            }
+
+            LunarPrototypeGuideController guideController = hub.GetComponent<LunarPrototypeGuideController>();
+            if (guideController == null)
+            {
+                guideController = hub.gameObject.AddComponent<LunarPrototypeGuideController>();
+            }
+
+            guideController.Configure(
+                hub.CorridorGuideRenderers,
+                hub.ResourceGuideRenderers,
+                hub.RitualGuideRenderers);
+        }
+
+        private void ConfigureSceneryPresentation(LunarPrototypeReferenceHub hub)
+        {
+            if (hub == null)
+            {
+                return;
+            }
+
+            LunarPrototypeSceneryController sceneryController = hub.GetComponent<LunarPrototypeSceneryController>();
+            if (sceneryController == null)
+            {
+                sceneryController = hub.gameObject.AddComponent<LunarPrototypeSceneryController>();
+            }
+
+            sceneryController.Configure(
+                hub.OperationsScreenRenderer,
+                hub.BreathPanelRenderer,
+                hub.ObservationGlassRenderer,
+                hub.EarthriseRenderer);
+        }
+
+        private Volume EnsurePrototypeVolume()
+        {
+            Volume volume = FindObjectOfType<Volume>();
+            if (volume == null)
+            {
+                GameObject volumeObject = new GameObject("Prototype Global Volume");
+                volume = volumeObject.AddComponent<Volume>();
+                volume.isGlobal = true;
+                volume.priority = 5f;
+            }
+
+            if (volume.sharedProfile == null)
+            {
+                VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                profile.name = "PrototypeRuntimeVolume";
+                profile.hideFlags = HideFlags.DontSave;
+
+                ColorAdjustments colorAdjustments = profile.Add<ColorAdjustments>(true);
+                colorAdjustments.postExposure.overrideState = true;
+                colorAdjustments.postExposure.value = 0f;
+                colorAdjustments.contrast.overrideState = true;
+                colorAdjustments.contrast.value = -5f;
+                colorAdjustments.saturation.overrideState = true;
+                colorAdjustments.saturation.value = -12f;
+                colorAdjustments.colorFilter.overrideState = true;
+                colorAdjustments.colorFilter.value = new Color(0.92f, 0.96f, 1f);
+
+                Bloom bloom = profile.Add<Bloom>(true);
+                bloom.intensity.overrideState = true;
+                bloom.intensity.value = 0.45f;
+                bloom.threshold.overrideState = true;
+                bloom.threshold.value = 0.95f;
+                bloom.scatter.overrideState = true;
+                bloom.scatter.value = 0.7f;
+
+                Vignette vignette = profile.Add<Vignette>(true);
+                vignette.intensity.overrideState = true;
+                vignette.intensity.value = 0.16f;
+                vignette.smoothness.overrideState = true;
+                vignette.smoothness.value = 0.72f;
+
+                FilmGrain filmGrain = profile.Add<FilmGrain>(true);
+                filmGrain.intensity.overrideState = true;
+                filmGrain.intensity.value = 0.08f;
+                filmGrain.response.overrideState = true;
+                filmGrain.response.value = 0.85f;
+
+                volume.sharedProfile = profile;
+            }
+
+            return volume;
+        }
+
+        private Material EnsurePrototypeSkybox(Light directionalLight)
+        {
+            Material currentSkybox = RenderSettings.skybox;
+            if (currentSkybox != null && currentSkybox.shader != null && currentSkybox.shader.name == "Skybox/Procedural")
+            {
+                if (directionalLight != null)
+                {
+                    RenderSettings.sun = directionalLight;
+                }
+
+                return currentSkybox;
+            }
+
+            Shader skyboxShader = Shader.Find("Skybox/Procedural");
+            if (skyboxShader == null)
+            {
+                return currentSkybox;
+            }
+
+            Material skyboxMaterial = new Material(skyboxShader);
+            skyboxMaterial.name = "Prototype Procedural Skybox";
+            skyboxMaterial.hideFlags = HideFlags.DontSave;
+
+            if (skyboxMaterial.HasProperty("_SkyTint"))
+            {
+                skyboxMaterial.SetColor("_SkyTint", new Color(0.16f, 0.24f, 0.34f));
+            }
+
+            if (skyboxMaterial.HasProperty("_GroundColor"))
+            {
+                skyboxMaterial.SetColor("_GroundColor", new Color(0.09f, 0.1f, 0.12f));
+            }
+
+            if (skyboxMaterial.HasProperty("_Exposure"))
+            {
+                skyboxMaterial.SetFloat("_Exposure", 1.2f);
+            }
+
+            if (skyboxMaterial.HasProperty("_AtmosphereThickness"))
+            {
+                skyboxMaterial.SetFloat("_AtmosphereThickness", 0.55f);
+            }
+
+            RenderSettings.skybox = skyboxMaterial;
+            if (directionalLight != null)
+            {
+                RenderSettings.sun = directionalLight;
+            }
+
+            return skyboxMaterial;
+        }
+
+        private void EnsurePrototypeUi(LunarPrototypeReferenceHub hub)
+        {
+            Font defaultFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            EnsureDebugHud(defaultFont);
+            EnsureWorldDisplayPanels(hub, defaultFont);
+        }
+
+        private void EnsureDebugHud(Font defaultFont)
         {
             if (FindObjectOfType<LunarPrototypeDebugPanel>() != null)
             {
                 return;
             }
-
-            Font defaultFont = Resources.GetBuiltinResource<Font>("Arial.ttf");
 
             GameObject canvasObject = new GameObject("LunarPrototypeCanvas");
             Canvas canvas = canvasObject.AddComponent<Canvas>();
@@ -280,6 +466,98 @@ namespace Lunar.Core
             debugPanel.Configure(headerText, resourceText, hintText, feedbackButton);
 
             CreateFeedbackCanvas(canvasRect, defaultFont);
+        }
+
+        private void EnsureWorldDisplayPanels(LunarPrototypeReferenceHub hub, Font font)
+        {
+            if (hub == null)
+            {
+                return;
+            }
+
+            EnsureWorldDisplayPanel(
+                hub.OperationsDisplayAnchor,
+                "Operations Display Canvas",
+                font,
+                LunarWorldDisplayPanel.DisplayMode.Operations,
+                "OPS",
+                new Color(0.03f, 0.07f, 0.11f, 0.92f),
+                new Color(0.18f, 0.62f, 0.82f, 0.95f));
+
+            EnsureWorldDisplayPanel(
+                hub.QuietDeckDisplayAnchor,
+                "Quiet Deck Display Canvas",
+                font,
+                LunarWorldDisplayPanel.DisplayMode.Guidance,
+                "QUIET DECK",
+                new Color(0.04f, 0.08f, 0.1f, 0.9f),
+                new Color(0.28f, 0.74f, 0.72f, 0.92f));
+        }
+
+        private void EnsureWorldDisplayPanel(
+            Transform anchor,
+            string objectName,
+            Font font,
+            LunarWorldDisplayPanel.DisplayMode mode,
+            string label,
+            Color panelColor,
+            Color accentColor)
+        {
+            if (anchor == null || font == null)
+            {
+                return;
+            }
+
+            Transform existing = anchor.Find(objectName);
+            if (existing != null && existing.GetComponent<LunarWorldDisplayPanel>() != null)
+            {
+                Canvas existingCanvas = existing.GetComponent<Canvas>();
+                if (existingCanvas != null && Camera.main != null)
+                {
+                    existingCanvas.worldCamera = Camera.main;
+                }
+
+                return;
+            }
+
+            GameObject canvasObject = new GameObject(objectName);
+            canvasObject.transform.SetParent(anchor, false);
+            canvasObject.transform.localPosition = Vector3.zero;
+            canvasObject.transform.localRotation = Quaternion.identity;
+            canvasObject.transform.localScale = Vector3.one * 0.0032f;
+
+            Canvas canvas = canvasObject.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = Camera.main;
+            canvas.sortingOrder = 2;
+
+            CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
+            scaler.dynamicPixelsPerUnit = 14f;
+
+            RectTransform canvasRect = canvas.GetComponent<RectTransform>();
+            canvasRect.sizeDelta = new Vector2(620f, 360f);
+
+            GameObject panel = CreateStretchImage("Panel", canvasRect, panelColor);
+            RectTransform panelRect = panel.transform as RectTransform;
+
+            CreateStretchImage("Glow", panelRect, new Color(accentColor.r, accentColor.g, accentColor.b, 0.06f));
+            CreatePanel("Accent Bar", panelRect, new Vector2(0f, 0f), new Vector2(620f, 8f), accentColor);
+            CreatePanel("Footer Bar", panelRect, new Vector2(0f, -352f), new Vector2(620f, 8f), new Color(accentColor.r, accentColor.g, accentColor.b, 0.55f));
+
+            Text titleText = CreateText("Title", panelRect, font, 24, TextAnchor.UpperLeft, new Vector2(24f, -18f), new Vector2(572f, 34f));
+            titleText.color = new Color(0.86f, 0.94f, 0.98f);
+
+            Text statusText = CreateText("Status", panelRect, font, 18, TextAnchor.UpperLeft, new Vector2(24f, -64f), new Vector2(572f, 104f));
+            statusText.color = new Color(0.78f, 0.86f, 0.93f);
+
+            Text guidanceText = CreateText("Guidance", panelRect, font, 17, TextAnchor.UpperLeft, new Vector2(24f, -178f), new Vector2(572f, 118f));
+            guidanceText.color = new Color(0.85f, 0.91f, 0.95f);
+
+            GameObject alertPanel = CreatePanel("Alert Panel", panelRect, new Vector2(24f, -314f), new Vector2(572f, 30f), new Color(accentColor.r, accentColor.g, accentColor.b, 0.14f));
+            Text alertText = CreateText("Alert Text", alertPanel.transform as RectTransform, font, 16, TextAnchor.MiddleCenter, new Vector2(0f, -4f), new Vector2(548f, 24f), true);
+
+            LunarWorldDisplayPanel displayPanel = canvasObject.AddComponent<LunarWorldDisplayPanel>();
+            displayPanel.Configure(titleText, statusText, guidanceText, alertText, alertPanel.GetComponent<Image>(), mode, label);
         }
 
         private Canvas CreateFeedbackCanvas(RectTransform parent, Font font)
@@ -359,6 +637,22 @@ namespace Lunar.Core
             rectTransform.anchoredPosition = anchoredPosition;
             rectTransform.sizeDelta = size;
             return panelObject;
+        }
+
+        private GameObject CreateStretchImage(string name, RectTransform parent, Color color)
+        {
+            GameObject imageObject = new GameObject(name);
+            imageObject.transform.SetParent(parent, false);
+
+            Image image = imageObject.AddComponent<Image>();
+            image.color = color;
+
+            RectTransform rectTransform = imageObject.GetComponent<RectTransform>();
+            rectTransform.anchorMin = Vector2.zero;
+            rectTransform.anchorMax = Vector2.one;
+            rectTransform.offsetMin = Vector2.zero;
+            rectTransform.offsetMax = Vector2.zero;
+            return imageObject;
         }
 
         private Text CreateText(

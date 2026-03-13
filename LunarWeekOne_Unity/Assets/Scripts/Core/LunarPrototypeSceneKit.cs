@@ -15,6 +15,18 @@ namespace Lunar.Core
         [SerializeField] private Renderer[] resourceRenderers;
         [SerializeField] private ParticleSystem dustParticles;
         [SerializeField] private ParticleSystem anomalyParticles;
+        [SerializeField] private Transform operationsDisplayAnchor;
+        [SerializeField] private Transform quietDeckDisplayAnchor;
+        [SerializeField] private Transform resourceFocusAnchor;
+        [SerializeField] private Transform ritualFocusAnchor;
+        [SerializeField] private Transform quietDeckFocusAnchor;
+        [SerializeField] private Renderer[] corridorGuideRenderers;
+        [SerializeField] private Renderer[] resourceGuideRenderers;
+        [SerializeField] private Renderer[] ritualGuideRenderers;
+        [SerializeField] private Renderer operationsScreenRenderer;
+        [SerializeField] private Renderer breathPanelRenderer;
+        [SerializeField] private Renderer observationGlassRenderer;
+        [SerializeField] private Renderer earthriseRenderer;
 
         public Transform PlayerAnchor => playerAnchor;
         public Light BaseStatusLight => baseStatusLight;
@@ -25,6 +37,18 @@ namespace Lunar.Core
         public Renderer[] ResourceRenderers => resourceRenderers;
         public ParticleSystem DustParticles => dustParticles;
         public ParticleSystem AnomalyParticles => anomalyParticles;
+        public Transform OperationsDisplayAnchor => operationsDisplayAnchor;
+        public Transform QuietDeckDisplayAnchor => quietDeckDisplayAnchor;
+        public Transform ResourceFocusAnchor => resourceFocusAnchor;
+        public Transform RitualFocusAnchor => ritualFocusAnchor;
+        public Transform QuietDeckFocusAnchor => quietDeckFocusAnchor;
+        public Renderer[] CorridorGuideRenderers => corridorGuideRenderers;
+        public Renderer[] ResourceGuideRenderers => resourceGuideRenderers;
+        public Renderer[] RitualGuideRenderers => ritualGuideRenderers;
+        public Renderer OperationsScreenRenderer => operationsScreenRenderer;
+        public Renderer BreathPanelRenderer => breathPanelRenderer;
+        public Renderer ObservationGlassRenderer => observationGlassRenderer;
+        public Renderer EarthriseRenderer => earthriseRenderer;
 
         public void Configure(
             Transform anchor,
@@ -35,7 +59,19 @@ namespace Lunar.Core
             Renderer valveRenderer,
             Renderer[] resourceNodeRenderers,
             ParticleSystem dust,
-            ParticleSystem anomaly)
+            ParticleSystem anomaly,
+            Transform operationsAnchor,
+            Transform quietAnchor,
+            Transform resourceAnchor,
+            Transform ritualAnchor,
+            Transform quietFocusAnchor,
+            Renderer[] corridorGuides,
+            Renderer[] resourceGuides,
+            Renderer[] ritualGuides,
+            Renderer operationsScreen,
+            Renderer breathPanel,
+            Renderer observationGlass,
+            Renderer earthrise)
         {
             playerAnchor = anchor;
             baseStatusLight = statusLight;
@@ -46,6 +82,18 @@ namespace Lunar.Core
             resourceRenderers = resourceNodeRenderers;
             dustParticles = dust;
             anomalyParticles = anomaly;
+            operationsDisplayAnchor = operationsAnchor;
+            quietDeckDisplayAnchor = quietAnchor;
+            resourceFocusAnchor = resourceAnchor;
+            ritualFocusAnchor = ritualAnchor;
+            quietDeckFocusAnchor = quietFocusAnchor;
+            corridorGuideRenderers = corridorGuides;
+            resourceGuideRenderers = resourceGuides;
+            ritualGuideRenderers = ritualGuides;
+            operationsScreenRenderer = operationsScreen;
+            breathPanelRenderer = breathPanel;
+            observationGlassRenderer = observationGlass;
+            earthriseRenderer = earthrise;
         }
     }
 
@@ -79,13 +127,22 @@ namespace Lunar.Core
             Light baseStatusLight = CreateStatusLight(shell);
             List<Light> interiorLights = CreateInteriorLights(shell);
             Light ritualLight = CreateRitualLight(shell);
+            Renderer operationsScreenRenderer;
+            Renderer breathPanelRenderer;
+            Renderer observationGlassRenderer;
+            Renderer earthriseRenderer;
 
             CreateCorridor(shell, hullMaterial, trimMaterial, deckMaterial);
+            Renderer[] corridorGuideRenderers = CreateCorridorGuides(shell);
+            Transform resourceFocusAnchor = CreateFocusAnchor(shell, "Resource Focus Anchor", new Vector3(0f, 2.05f, -2.25f), Quaternion.Euler(10f, 0f, 0f));
+            Transform operationsDisplayAnchor = CreateOperationsDisplayMount(shell, trimMaterial, glassMaterial, out operationsScreenRenderer);
             CreateSideBay(shell, "Energy Bay", new Vector3(-4.6f, 0f, 1.6f), hullMaterial, trimMaterial);
             CreateSideBay(shell, "Oxygen Bay", new Vector3(0f, 0f, 1.6f), hullMaterial, trimMaterial);
             CreateSideBay(shell, "Water Bay", new Vector3(4.6f, 0f, 1.6f), hullMaterial, trimMaterial);
-            CreateQuietDeck(shell, hullMaterial, trimMaterial, glassMaterial);
-            CreateObservationDeck(shell, trimMaterial, glassMaterial, regolithMaterial);
+            Transform quietDeckDisplayAnchor = CreateQuietDeck(shell, hullMaterial, trimMaterial, glassMaterial, out breathPanelRenderer);
+            Transform quietDeckFocusAnchor = CreateFocusAnchor(shell, "Quiet Deck Focus Anchor", new Vector3(-1.6f, 2f, 6f), Quaternion.Euler(11f, -30f, 0f));
+            CreateObservationDeck(shell, trimMaterial, glassMaterial, regolithMaterial, out observationGlassRenderer, out earthriseRenderer);
+            Renderer[] resourceGuideRenderers = CreateResourceGuides(shell);
 
             Renderer[] resourceRenderers =
             {
@@ -96,14 +153,15 @@ namespace Lunar.Core
 
             GameObject ritualIndicator = CreateRitualIndicator(shell, ritualLight);
             Renderer valveRenderer = CreateRitualChamber(shell, hullMaterial, trimMaterial);
+            Transform ritualFocusAnchor = CreateFocusAnchor(shell, "Ritual Focus Anchor", new Vector3(0f, 1.95f, 3.25f), Quaternion.Euler(8f, 0f, 0f));
+            Renderer[] ritualGuideRenderers = CreateRitualGuides(shell);
             ParticleSystem dustParticles = CreateDustParticles(shell, new Vector3(0f, 1.9f, 8.8f), new Vector3(6f, 2.5f, 0.8f), new Color(0.78f, 0.84f, 1f, 0.18f), "Dust Particles");
             ParticleSystem anomalyParticles = CreateDustParticles(shell, new Vector3(0f, 1.4f, 5.2f), new Vector3(4f, 2f, 6f), new Color(1f, 0.38f, 0.22f, 0.28f), "Anomaly Particles");
             anomalyParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
-            Renderer windowRenderer = GameObject.Find(WindowGlassName)?.GetComponent<Renderer>();
-            if (windowRenderer != null)
+            if (observationGlassRenderer != null)
             {
-                windowRenderer.material = glassMaterial;
+                observationGlassRenderer.material = glassMaterial;
             }
 
             LunarPrototypeReferenceHub hub = root.AddComponent<LunarPrototypeReferenceHub>();
@@ -116,7 +174,19 @@ namespace Lunar.Core
                 valveRenderer,
                 resourceRenderers,
                 dustParticles,
-                anomalyParticles);
+                anomalyParticles,
+                operationsDisplayAnchor,
+                quietDeckDisplayAnchor,
+                resourceFocusAnchor,
+                ritualFocusAnchor,
+                quietDeckFocusAnchor,
+                corridorGuideRenderers,
+                resourceGuideRenderers,
+                ritualGuideRenderers,
+                operationsScreenRenderer,
+                breathPanelRenderer,
+                observationGlassRenderer,
+                earthriseRenderer);
 
             return hub;
         }
@@ -140,6 +210,17 @@ namespace Lunar.Core
             CreateBox(parent, "Center Walkway", new Vector3(0f, 0.04f, 2.4f), new Vector3(3.2f, 0.06f, 19f), trimMaterial);
             CreateBox(parent, "Center Rail Left", new Vector3(-1.75f, 0.55f, 2.4f), new Vector3(0.08f, 1f, 19f), trimMaterial);
             CreateBox(parent, "Center Rail Right", new Vector3(1.75f, 0.55f, 2.4f), new Vector3(0.08f, 1f, 19f), trimMaterial);
+        }
+
+        private static Renderer[] CreateCorridorGuides(Transform parent)
+        {
+            return new[]
+            {
+                CreateGuideStrip(parent, "Corridor Guide 1", new Vector3(0f, 0.05f, -3.8f), new Vector3(0.82f, 0.03f, 1.8f), new Color(0.22f, 0.62f, 0.78f)),
+                CreateGuideStrip(parent, "Corridor Guide 2", new Vector3(0f, 0.05f, 0.1f), new Vector3(0.82f, 0.03f, 1.8f), new Color(0.22f, 0.62f, 0.78f)),
+                CreateGuideStrip(parent, "Corridor Guide 3", new Vector3(0f, 0.05f, 4.1f), new Vector3(0.82f, 0.03f, 1.8f), new Color(0.22f, 0.62f, 0.78f)),
+                CreateGuideStrip(parent, "Corridor Guide 4", new Vector3(0f, 0.05f, 8.1f), new Vector3(0.82f, 0.03f, 1.8f), new Color(0.22f, 0.62f, 0.78f))
+            };
         }
 
         private static void CreateSideBay(Transform parent, string name, Vector3 center, Material hullMaterial, Material trimMaterial)
@@ -184,6 +265,16 @@ namespace Lunar.Core
             return renderer;
         }
 
+        private static Renderer[] CreateResourceGuides(Transform parent)
+        {
+            return new[]
+            {
+                CreateGuideStrip(parent, "Energy Guide", new Vector3(-3.05f, 0.05f, 1.1f), new Vector3(2.2f, 0.03f, 0.26f), new Color(0.95f, 0.72f, 0.18f)),
+                CreateGuideStrip(parent, "Oxygen Guide", new Vector3(0f, 0.05f, 1.1f), new Vector3(2.2f, 0.03f, 0.26f), new Color(0.4f, 0.82f, 1f)),
+                CreateGuideStrip(parent, "Water Guide", new Vector3(3.05f, 0.05f, 1.1f), new Vector3(2.2f, 0.03f, 0.26f), new Color(0.22f, 0.9f, 0.72f))
+            };
+        }
+
         private static Renderer CreateRitualChamber(Transform parent, Material hullMaterial, Material trimMaterial)
         {
             GameObject chamber = new GameObject("Ritual Chamber");
@@ -217,6 +308,16 @@ namespace Lunar.Core
             return valveRenderer;
         }
 
+        private static Renderer[] CreateRitualGuides(Transform parent)
+        {
+            return new[]
+            {
+                CreateGuideStrip(parent, "Ritual Guide 1", new Vector3(0f, 0.05f, 4.9f), new Vector3(0.92f, 0.03f, 1.15f), new Color(0.28f, 0.84f, 1f)),
+                CreateGuideStrip(parent, "Ritual Guide 2", new Vector3(0f, 0.05f, 6.4f), new Vector3(0.92f, 0.03f, 1.15f), new Color(0.28f, 0.84f, 1f)),
+                CreateGuideStrip(parent, "Ritual Guide 3", new Vector3(0f, 0.05f, 7.95f), new Vector3(1.35f, 0.03f, 0.9f), new Color(0.28f, 0.84f, 1f))
+            };
+        }
+
         private static GameObject CreateRitualIndicator(Transform parent, Light ritualLight)
         {
             GameObject indicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -242,7 +343,22 @@ namespace Lunar.Core
             return indicator;
         }
 
-        private static void CreateQuietDeck(Transform parent, Material hullMaterial, Material trimMaterial, Material glassMaterial)
+        private static Transform CreateOperationsDisplayMount(Transform parent, Material trimMaterial, Material glassMaterial, out Renderer displayRenderer)
+        {
+            CreateBox(parent, "Operations Screen Housing", new Vector3(6.72f, 1.55f, -0.8f), new Vector3(0.2f, 1.85f, 2.8f), trimMaterial);
+            GameObject screen = CreateBox(parent, "Operations Screen Surface", new Vector3(6.62f, 1.55f, -0.8f), new Vector3(0.04f, 1.56f, 2.45f), glassMaterial);
+            Renderer screenRenderer = screen.GetComponent<Renderer>();
+            if (screenRenderer != null)
+            {
+                screenRenderer.material.EnableKeyword("_EMISSION");
+                screenRenderer.material.SetColor("_EmissionColor", new Color(0.08f, 0.22f, 0.32f));
+            }
+
+            displayRenderer = screenRenderer;
+            return CreateDisplayAnchor(parent, "Operations Display Anchor", new Vector3(6.58f, 1.55f, -0.8f), Quaternion.Euler(0f, -90f, 0f));
+        }
+
+        private static Transform CreateQuietDeck(Transform parent, Material hullMaterial, Material trimMaterial, Material glassMaterial, out Renderer breathRenderer)
         {
             GameObject quietDeck = new GameObject("Quiet Deck");
             quietDeck.transform.SetParent(parent, false);
@@ -260,9 +376,18 @@ namespace Lunar.Core
                 panelRenderer.material.EnableKeyword("_EMISSION");
                 panelRenderer.material.SetColor("_EmissionColor", new Color(0.12f, 0.34f, 0.4f));
             }
+
+            breathRenderer = panelRenderer;
+            return CreateDisplayAnchor(quietDeck.transform, "Quiet Display Anchor", new Vector3(0f, 1.45f, 0.73f), Quaternion.Euler(0f, 180f, 0f));
         }
 
-        private static void CreateObservationDeck(Transform parent, Material trimMaterial, Material glassMaterial, Material regolithMaterial)
+        private static void CreateObservationDeck(
+            Transform parent,
+            Material trimMaterial,
+            Material glassMaterial,
+            Material regolithMaterial,
+            out Renderer glassRenderer,
+            out Renderer earthRenderer)
         {
             GameObject deck = new GameObject("Observation Deck");
             deck.transform.SetParent(parent, false);
@@ -279,7 +404,7 @@ namespace Lunar.Core
             glass.transform.localPosition = new Vector3(0f, 1.55f, -0.02f);
             glass.transform.localScale = new Vector3(5.55f, 2.55f, 1f);
             glass.transform.localRotation = Quaternion.identity;
-            Renderer glassRenderer = glass.GetComponent<Renderer>();
+            glassRenderer = glass.GetComponent<Renderer>();
             if (glassRenderer != null)
             {
                 glassRenderer.material = glassMaterial;
@@ -295,7 +420,7 @@ namespace Lunar.Core
             earth.transform.SetParent(deck.transform, false);
             earth.transform.localPosition = new Vector3(4.2f, 2.75f, 10.2f);
             earth.transform.localScale = Vector3.one * 1.35f;
-            Renderer earthRenderer = earth.GetComponent<Renderer>();
+            earthRenderer = earth.GetComponent<Renderer>();
             if (earthRenderer != null)
             {
                 Material earthMaterial = CreateLitMaterial("EarthriseMaterial", new Color(0.24f, 0.52f, 0.9f), 0.22f);
@@ -392,6 +517,37 @@ namespace Lunar.Core
 
             system.Play();
             return system;
+        }
+
+        private static Renderer CreateGuideStrip(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Color color)
+        {
+            GameObject strip = CreateBox(parent, name, localPosition, localScale, CreateLitMaterial($"{name} Material", color, 0.06f));
+            Renderer renderer = strip.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                renderer.material.EnableKeyword("_EMISSION");
+                renderer.material.SetColor("_EmissionColor", color * 0.12f);
+            }
+
+            return renderer;
+        }
+
+        private static Transform CreateDisplayAnchor(Transform parent, string name, Vector3 localPosition, Quaternion localRotation)
+        {
+            GameObject anchor = new GameObject(name);
+            anchor.transform.SetParent(parent, false);
+            anchor.transform.localPosition = localPosition;
+            anchor.transform.localRotation = localRotation;
+            return anchor.transform;
+        }
+
+        private static Transform CreateFocusAnchor(Transform parent, string name, Vector3 localPosition, Quaternion localRotation)
+        {
+            GameObject anchor = new GameObject(name);
+            anchor.transform.SetParent(parent, false);
+            anchor.transform.localPosition = localPosition;
+            anchor.transform.localRotation = localRotation;
+            return anchor.transform;
         }
 
         private static GameObject CreateBox(Transform parent, string name, Vector3 localPosition, Vector3 localScale, Material material)

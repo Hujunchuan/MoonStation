@@ -102,7 +102,7 @@ namespace Lunar.Core
             hintText.text =
                 $"Question: {questionLine}\n" +
                 $"{interactionHint}\n" +
-                "R to interact with ritual valve, N to skip, ESC to end";
+                "R to interact, C to refocus camera, N to skip, ESC to end";
         }
 
         private void OpenFeedback()

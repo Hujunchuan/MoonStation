@@ -333,6 +333,11 @@ namespace Lunar.Core
             return total / trackedTypes.Length;
         }
 
+        public bool IsAnomalyActive()
+        {
+            return isAnomalyActive;
+        }
+
         public void ResetResources()
         {
             foreach (ResourceType type in trackedTypes)

@@ -22,6 +22,11 @@ If you only want to verify the scripts quickly:
 2. Enter Play Mode.
 3. `LunarPrototypeBootstrap` will create the minimum camera, systems, prototype nodes, ritual valve, floor, debug HUD, and feedback panel at runtime.
 4. If no clips exist under `Assets/Resources/Audio`, the prototype will generate fallback ambient, breath, and cue audio automatically.
+5. If no authored post-processing or skybox is present, the prototype will also generate fallback visual grading and a procedural skybox at runtime.
+6. The greybox shell now includes world-space operations and quiet-deck displays that mirror day state, resources, and ritual prompts inside the station.
+7. Floor guide lights now steer attention toward the weakest resource bay during management and toward the ritual chamber when interaction is required.
+8. Press `C` to refocus the prototype camera on the current context; vertical camera nudging now uses `PageUp` / `PageDown` so it no longer conflicts with ritual interaction on `R`.
+9. Quiet-deck glass, breath panel, operations screen glow, and the Earthrise marker now shift automatically with day progression, anomaly pressure, and ritual focus.
 
 If you want an actual startup flow:
 

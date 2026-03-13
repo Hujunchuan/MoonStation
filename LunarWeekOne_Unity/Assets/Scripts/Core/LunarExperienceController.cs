@@ -105,7 +105,7 @@ namespace Lunar.Core
                 resourceManager.GetResource(ResourceType.Water));
 
             audioEngine.StartAmbientLayer();
-            environmentController?.SetDay(startDay);
+            RefreshEnvironmentForCurrentState();
 
             StartCoroutine(ExperienceTimeoutCheck());
         }
@@ -115,6 +115,11 @@ namespace Lunar.Core
             if (stateMachine == null)
             {
                 stateMachine = LunarDayStateMachine.Instance;
+            }
+
+            if (environmentController == null)
+            {
+                environmentController = FindObjectOfType<LunarEnvironmentController>();
             }
 
             if (audioEngine == null)
@@ -227,13 +232,14 @@ namespace Lunar.Core
         private void HandleAnomalyStarted()
         {
             audioEngine.SetAmbientFrequency(85f);
+            EnsureEnvironmentController();
             environmentController?.SetEnvironmentState(LunarEnvironmentController.EnvironmentState.Anomaly);
         }
 
         private void HandleAnomalyResolved()
         {
             audioEngine.SetAmbientFrequency(60f);
-            environmentController?.SetDay(stateMachine.CurrentDay);
+            RefreshEnvironmentForCurrentState();
         }
 
         private void HandleDayChanged(LunarDay day)
@@ -245,7 +251,7 @@ namespace Lunar.Core
                 resourceManager.ApplyDayConfig(config);
             }
 
-            environmentController?.SetDay(day);
+            RefreshEnvironmentForCurrentState();
         }
 
         private void HandleDayCompleted(LunarDay day)
@@ -269,6 +275,8 @@ namespace Lunar.Core
                     resourceManager.DisableManagement();
                     break;
             }
+
+            RefreshEnvironmentForCurrentState();
         }
 
         private void HandleRitualCompleted(RitualCompletionResult result)
@@ -365,6 +373,44 @@ namespace Lunar.Core
             if (collectFeedback)
             {
                 feedbackCollector.CollectFinalFeedback();
+            }
+        }
+
+        private void EnsureEnvironmentController()
+        {
+            if (environmentController == null)
+            {
+                environmentController = FindObjectOfType<LunarEnvironmentController>();
+            }
+        }
+
+        private void RefreshEnvironmentForCurrentState()
+        {
+            EnsureEnvironmentController();
+            if (environmentController == null || stateMachine == null)
+            {
+                return;
+            }
+
+            if (resourceManager != null && resourceManager.IsAnomalyActive())
+            {
+                environmentController.SetEnvironmentState(LunarEnvironmentController.EnvironmentState.Anomaly);
+                return;
+            }
+
+            switch (stateMachine.CurrentState)
+            {
+                case LunarDayState.Ritual:
+                    environmentController.SetEnvironmentState(LunarEnvironmentController.EnvironmentState.Ritual);
+                    break;
+
+                case LunarDayState.Transition:
+                    environmentController.SetEnvironmentState(LunarEnvironmentController.EnvironmentState.Transition);
+                    break;
+
+                default:
+                    environmentController.SetDay(stateMachine.CurrentDay);
+                    break;
             }
         }
 

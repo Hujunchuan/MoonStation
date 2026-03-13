@@ -23,6 +23,8 @@ namespace Lunar.Core
         [SerializeField] private bool enableKeyboardMovement = true;
         [SerializeField] private bool enableZoom = true;
         [SerializeField] private float mouseSensitivity = 0.5f;
+        [SerializeField] private KeyCode moveUpKey = KeyCode.PageUp;
+        [SerializeField] private KeyCode moveDownKey = KeyCode.PageDown;
 
         private Camera controlledCamera;
         private Vector3 targetPosition;
@@ -35,11 +37,7 @@ namespace Lunar.Core
 
         private void Start()
         {
-            controlledCamera = GetComponent<Camera>();
-            if (controlledCamera == null)
-            {
-                controlledCamera = Camera.main;
-            }
+            EnsureCameraReference();
 
             targetPosition = transform.position;
             targetZoom = GetCurrentZoom();
@@ -124,12 +122,12 @@ namespace Lunar.Core
                 transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime, Space.World);
             }
 
-            if (Input.GetKey(KeyCode.R))
+            if (Input.GetKey(moveUpKey))
             {
                 targetPosition.y += movementSpeed * Time.deltaTime;
             }
 
-            if (Input.GetKey(KeyCode.F))
+            if (Input.GetKey(moveDownKey))
             {
                 targetPosition.y -= movementSpeed * Time.deltaTime;
             }
@@ -137,14 +135,13 @@ namespace Lunar.Core
 
         private void ApplyMovement()
         {
-            targetPosition.x = Mathf.Clamp(targetPosition.x, xConstraints.x, xConstraints.y);
-            targetPosition.y = Mathf.Clamp(targetPosition.y, minY, maxY);
-            targetPosition.z = Mathf.Clamp(targetPosition.z, zConstraints.x, zConstraints.y);
+            targetPosition = ClampPosition(targetPosition);
             transform.position = Vector3.SmoothDamp(transform.position, targetPosition, ref velocity, smoothTime);
         }
 
         private void ApplyZoom()
         {
+            EnsureCameraReference();
             if (controlledCamera == null)
             {
                 return;
@@ -183,6 +180,44 @@ namespace Lunar.Core
             targetZoom = controlledCamera != null && controlledCamera.orthographic ? 5f : 60f;
         }
 
+        public void FocusOn(Transform anchor, float? zoom = null)
+        {
+            if (anchor == null)
+            {
+                return;
+            }
+
+            SnapToPose(anchor.position, anchor.rotation, zoom);
+        }
+
+        public void SnapToPose(Vector3 position, Quaternion rotation, float? zoom = null)
+        {
+            EnsureCameraReference();
+
+            Vector3 clampedPosition = ClampPosition(position);
+            targetPosition = clampedPosition;
+            velocity = Vector3.zero;
+            transform.position = clampedPosition;
+            transform.rotation = rotation;
+
+            if (zoom.HasValue)
+            {
+                targetZoom = Mathf.Clamp(zoom.Value, minZoom, maxZoom);
+
+                if (controlledCamera != null)
+                {
+                    if (controlledCamera.orthographic)
+                    {
+                        controlledCamera.orthographicSize = targetZoom;
+                    }
+                    else
+                    {
+                        controlledCamera.fieldOfView = targetZoom;
+                    }
+                }
+            }
+        }
+
         public void SetMovementSpeed(float speed)
         {
             movementSpeed = Mathf.Max(0.1f, speed);
@@ -210,6 +245,7 @@ namespace Lunar.Core
 
         public float GetCurrentZoom()
         {
+            EnsureCameraReference();
             if (controlledCamera == null)
             {
                 return 60f;
@@ -218,6 +254,28 @@ namespace Lunar.Core
             return controlledCamera.orthographic
                 ? controlledCamera.orthographicSize
                 : controlledCamera.fieldOfView;
+        }
+
+        private void EnsureCameraReference()
+        {
+            if (controlledCamera != null)
+            {
+                return;
+            }
+
+            controlledCamera = GetComponent<Camera>();
+            if (controlledCamera == null)
+            {
+                controlledCamera = Camera.main;
+            }
+        }
+
+        private Vector3 ClampPosition(Vector3 position)
+        {
+            position.x = Mathf.Clamp(position.x, xConstraints.x, xConstraints.y);
+            position.y = Mathf.Clamp(position.y, minY, maxY);
+            position.z = Mathf.Clamp(position.z, zConstraints.x, zConstraints.y);
+            return position;
         }
     }
 }
