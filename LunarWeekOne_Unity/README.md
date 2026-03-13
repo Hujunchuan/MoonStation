@@ -1,7 +1,7 @@
 # Lunar Week One Prototype
 
 This folder is the Unity project root for the MoonStation prototype.
-Open `LunarWeekOne_Unity` directly in Unity Hub / Unity 2022 LTS.
+Open `LunarWeekOne_Unity` directly in Unity Hub / Unity 6.3 LTS (`6000.3.11f1`).
 
 This folder is a Unity prototype skeleton for the MoonStation concept.
 It is no longer treated as a complete, ready-made production project.
@@ -18,7 +18,7 @@ Instead, it now provides:
 
 If you only want to verify the scripts quickly:
 
-1. Open any empty scene in Unity 2022 LTS.
+1. Open any empty scene in Unity 6.3 LTS (`6000.3.11f1`).
 2. Enter Play Mode.
 3. `LunarPrototypeBootstrap` will create the minimum camera, systems, prototype nodes, ritual valve, floor, debug HUD, and feedback panel at runtime.
 4. If no clips exist under `Assets/Resources/Audio`, the prototype will generate fallback ambient, breath, and cue audio automatically.
@@ -37,6 +37,11 @@ If you want an actual startup flow:
    - `Assets/Scenes/LunarBase.unity`
 4. The tool also adds those scenes to Build Settings.
 5. Open `StartupScene` and enter Play Mode.
+
+## Unity 6 Note
+
+- This project now targets `Unity 6.3 LTS (6000.3.11f1)`.
+- In Unity 6, `URP` is treated as a core package that matches the Editor version, so the manifest tracks it as a core dependency instead of pinning an old `14.x` registry package.
 
 ## Generated Scene Flow
 
